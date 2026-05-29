@@ -2,8 +2,15 @@ package main
 
 import (
 	"fmt"
+
+	"github.com/AmirSff-Go/leaderboard-service/internal/config"
 )
 
 func main() {
-	fmt.Println("Leaderboard service starting...")
+	cfg, err := config.Load()
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("Config loaded: Port=%s, DB=%s\n", cfg.ServerPort, cfg.DatabaseURL)
 }
