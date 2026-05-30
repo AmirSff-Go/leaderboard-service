@@ -13,20 +13,16 @@ func main() {
 		panic(err)
 	}
 
-	// Test token generation
 	tokenGenerator := auth.NewTokenGenerator(cfg.JWTSecret)
 	token, err := tokenGenerator.GenerateToken("test-game-123", 1)
 	if err != nil {
 		panic(err)
 	}
+	fmt.Println("Generated token:", token[:50]+"...")
 
-	fmt.Println("Generated token:", token[:50]+"...") // Print first 50 chars
-
-	// Test token validation
-	claims, err := tokenGenerator.ValidateToken(token)
+	claims, err := tokenGenerator.ParseGameToken(token)
 	if err != nil {
 		panic(err)
 	}
-
-	fmt.Println("Valid token! Claims:", claims)
+	fmt.Printf("Valid token! game_id=%s token_version=%d\n", claims.GameID, claims.TokenVersion)
 }
