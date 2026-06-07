@@ -14,6 +14,14 @@ const (
 	OneTime  LeaderboardType = "onetime"
 )
 
+func IsValidLeaderboardType(t string) bool {
+	switch LeaderboardType(t) {
+	case Record, Additive, OneTime:
+		return true
+	}
+	return false
+}
+
 type Leaderboard struct {
 	ID              uuid.UUID       `json:"id"`
 	GameID          uuid.UUID       `json:"game_id"`
