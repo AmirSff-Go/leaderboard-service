@@ -1,10 +1,13 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 
-	"github.com/AmirSff-Go/leaderboard-service/internal/auth"
+	"github.com/AmirSff-Go/leaderboard-service/internal/api"
 	"github.com/AmirSff-Go/leaderboard-service/internal/config"
+	"github.com/AmirSff-Go/leaderboard-service/internal/repository"
+	_ "github.com/lib/pq"
 )
 
 func main() {
@@ -13,16 +16,23 @@ func main() {
 		panic(err)
 	}
 
-	tokenGenerator := auth.NewTokenGenerator(cfg.JWTSecret)
-	token, err := tokenGenerator.GenerateToken("test-game-123", 1)
+	// Connect to PostgreSQL
+	db, err := sql.Open("postgres", cfg.DatabaseURL)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("Generated token:", token[:50]+"...")
+	defer db.Close()
 
-	claims, err := tokenGenerator.ParseGameToken(token)
-	if err != nil {
+	if err := db.Ping(); err != nil {
 		panic(err)
 	}
-	fmt.Printf("Valid token! game_id=%s token_version=%d\n", claims.GameID, claims.TokenVersion)
+	fmt.Println("✅ Connected to PostgreSQL")
+
+	// Initialize repositories
+	gameRepo := repository.NewPostgresGameRepo(db)
+
+	// Setup and start server
+	server := api.NewServer(cfg, gameRepo)
+	fmt.Printf("🚀 Starting server on port %s\n", cfg.ServerPort)
+	server.Logger.Fatal(server.Start(":" + cfg.ServerPort))
 }
