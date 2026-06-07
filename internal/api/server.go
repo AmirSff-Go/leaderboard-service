@@ -12,6 +12,7 @@ import (
 func NewServer(
 	cfg *config.Config,
 	gameRepo repository.GameRepo,
+	leaderboardRepo repository.LeaderboardRepo,
 ) *echo.Echo {
 	e := echo.New()
 
@@ -35,8 +36,9 @@ func NewServer(
 	gameTokenMiddleware := GameTokenMiddleware(tokenGenerator, gameRepo)
 
 	gameGroup := e.Group("/leaderboards", gameTokenMiddleware)
-	_ = gameGroup
-	// TODO: Add leaderboard endpoints in Phase 3
+
+	leaderboardHandler := NewLeaderboardHandler(leaderboardRepo)
+	gameGroup.POST("", leaderboardHandler.CreateLeaderboard)
 
 	return e
 }
