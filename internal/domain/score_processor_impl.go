@@ -13,14 +13,14 @@ func (p *DefaultScoreProcessor) ProcessScore(ctx context.Context, leaderboardTyp
 
 	switch leaderboardType {
 	case Record:
-		if currentScore == nil || newScoreValue > currentScore.ScoreValue {
+		if currentScore == nil || newScoreValue > currentScore.Score {
 			return true, newScoreValue, nil
 		}
 		return false, 0, nil
 	case Additive:
 		finalValue := newScoreValue
 		if currentScore != nil {
-			finalValue += currentScore.ScoreValue
+			finalValue += currentScore.Score
 		}
 		return true, finalValue, nil
 	case OneTime:

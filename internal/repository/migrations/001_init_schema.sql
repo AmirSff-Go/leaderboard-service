@@ -19,6 +19,7 @@ CREATE TABLE leaderboards (
     type leaderboard_type NOT NULL,
     interval_seconds INT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
     UNIQUE(game_id, unique_name)
 );
@@ -31,7 +32,9 @@ CREATE TABLE scores (
     score BIGINT NOT NULL,
     duration_index INT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    FOREIGN KEY (leaderboard_id) REFERENCES leaderboards(id) ON DELETE CASCADE
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (leaderboard_id) REFERENCES leaderboards(id) ON DELETE CASCADE,
+    UNIQUE(leaderboard_id, user_id, duration_index)
 );
 
 -- Indexes for performance
