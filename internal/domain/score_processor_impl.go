@@ -1,34 +1,45 @@
 package domain
 
-import "context"
+import (
+	"context"
+)
 
-type DefaultScoreProcessor struct{}
+type RecordScoreProcessor struct{}
 
-func NewScoreProcessor() *DefaultScoreProcessor {
-	return &DefaultScoreProcessor{}
+func NewRecordScoreProcessor() *RecordScoreProcessor {
+	return &RecordScoreProcessor{}
 }
 
-func (p *DefaultScoreProcessor) ProcessScore(ctx context.Context, leaderboardType LeaderboardType,
-	currentScore *Score, newScoreValue int, userID string) (shouldSave bool, finalValue int, err error) {
-
-	switch leaderboardType {
-	case Record:
-		if currentScore == nil || newScoreValue > currentScore.Score {
-			return true, newScoreValue, nil
-		}
-		return false, 0, nil
-	case Additive:
-		finalValue := newScoreValue
-		if currentScore != nil {
-			finalValue += currentScore.Score
-		}
-		return true, finalValue, nil
-	case OneTime:
-		if currentScore == nil {
-			return true, newScoreValue, nil
-		}
-		return false, 0, nil
+func (p *RecordScoreProcessor) ProcessScore(ctx context.Context, currentScore *Score, newScore int, userID string) (shouldSave bool, finalScore int, err error) {
+	if currentScore == nil || newScore > currentScore.Score {
+		return true, newScore, nil
 	}
 	return false, 0, nil
+}
 
+type AdditiveScoreProcessor struct{}
+
+func NewAdditiveScoreProcessor() *AdditiveScoreProcessor {
+	return &AdditiveScoreProcessor{}
+}
+
+func (p *AdditiveScoreProcessor) ProcessScore(ctx context.Context, currentScore *Score, newScore int, userID string) (shouldSave bool, finalScore int, err error) {
+	finalScore = newScore
+	if currentScore != nil {
+		finalScore += currentScore.Score
+	}
+	return true, finalScore, nil
+}
+
+type OneTimeScoreProcessor struct{}
+
+func NewOneTimeScoreProcessor() *OneTimeScoreProcessor {
+	return &OneTimeScoreProcessor{}
+}
+
+func (p *OneTimeScoreProcessor) ProcessScore(ctx context.Context, currentScore *Score, newScore int, userID string) (shouldSave bool, finalScore int, err error) {
+	if currentScore == nil {
+		return true, newScore, nil
+	}
+	return false, 0, nil
 }

@@ -55,7 +55,7 @@ func (r *PostgresScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderb
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, ErrScoreNotFound
+			return nil, domain.ErrScoreNotFound
 		}
 		return nil, err
 	}

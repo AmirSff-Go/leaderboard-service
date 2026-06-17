@@ -1,8 +1,13 @@
 package domain
 
-import "context"
+import (
+	"context"
+)
 
 type ScoreProcessor interface {
-	ProcessScore(ctx context.Context, leaderboardType LeaderboardType,
-		currentScore *Score, newScoreValue int, userID string) (bool, int, error)
+	ProcessScore(ctx context.Context, currentScore *Score, newScore int, userID string) (shouldSave bool, finalScore int, err error)
+}
+
+type ScoreProcessorFactory interface {
+	GetProcessor(leaderboardType LeaderboardType) (ScoreProcessor, error)
 }
