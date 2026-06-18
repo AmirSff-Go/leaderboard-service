@@ -45,6 +45,7 @@ func NewServer(
 	gameGroup.POST("", leaderboardHandler.CreateLeaderboard)
 
 	gameGroup.POST("/:name/scores", leaderboardHandler.SubmitScore)
+	gameGroup.GET("/:name/rankings", leaderboardHandler.GetRankings)
 
 	return e
 }

@@ -17,6 +17,15 @@ type LeaderboardRepository interface {
 type ScoreRepository interface {
 	Upsert(ctx context.Context, score *Score) error
 	GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) (*Score, error)
+	CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int, error)
+	GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page, pageSize int) ([]*Score, error)
+	GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error)
+}
+
+type ScoreObject struct {
+	Rank   int    `json:"rank"`
+	UserID string `json:"user_id"`
+	Score  int    `json:"score"`
 }
 
 type LeaderboardService struct {
@@ -85,4 +94,57 @@ func (s *LeaderboardService) CreateLeaderboard(ctx context.Context, gameID uuid.
 		return nil, err
 	}
 	return leaderboard, nil
+}
+
+func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, leaderboardName string, page, pageSize int, userID string, durationIndex int) ([]*ScoreObject, int, *ScoreObject, error) {
+	leaderboard, err := s.leaderboardRepo.GetByGameAndName(ctx, gameID, leaderboardName)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+
+	if durationIndex == -1 {
+		durationIndex = CurrentDurationIndex(leaderboard)
+	}
+
+	rankingScores, err := s.scoreRepo.GetRanking(ctx, leaderboard.ID, durationIndex, page, pageSize)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+	rankingObjects := make([]*ScoreObject, len(rankingScores))
+	for i, score := range rankingScores {
+		rankingObjects[i] = &ScoreObject{
+			Rank:   (page-1)*pageSize + i + 1,
+			UserID: score.UserID,
+			Score:  score.Score,
+		}
+	}
+
+	total, err := s.scoreRepo.CountByLeaderboard(ctx, leaderboard.ID, durationIndex)
+	if err != nil {
+		return nil, 0, nil, err
+	}
+
+	var userEntry *ScoreObject
+	if userID != "" {
+		userScore, err := s.scoreRepo.GetByLeaderboardAndUser(ctx, leaderboard.ID, userID, durationIndex)
+		if err != nil {
+			if err == ErrScoreNotFound {
+				userEntry = nil
+			} else {
+				return nil, 0, nil, err
+			}
+		} else {
+			rank, err := s.scoreRepo.GetUserRank(ctx, leaderboard.ID, durationIndex, userScore.Score)
+			if err != nil {
+				return nil, 0, nil, err
+			}
+
+			userEntry = &ScoreObject{
+				Rank:   rank,
+				Score:  userScore.Score,
+				UserID: userScore.UserID,
+			}
+		}
+	}
+	return rankingObjects, total, userEntry, nil
 }

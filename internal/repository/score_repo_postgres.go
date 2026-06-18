@@ -39,10 +39,10 @@ func (r *PostgresScoreRepo) Upsert(ctx context.Context, score *domain.Score) err
 func (r *PostgresScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string,
 	durationIndex int) (*domain.Score, error) {
 	query := `
-                SELECT id, leaderboard_id, user_id, score, duration_index, created_at, updated_at
-                FROM scores
-                WHERE leaderboard_id = $1 AND user_id = $2 AND duration_index = $3
-        `
+				SELECT id, leaderboard_id, user_id, score, duration_index, created_at, updated_at
+				FROM scores
+				WHERE leaderboard_id = $1 AND user_id = $2 AND duration_index = $3
+		`
 	var score domain.Score
 	err := r.db.QueryRowContext(ctx, query, leaderboardID, userID, durationIndex).Scan(
 		&score.ID,
@@ -59,7 +59,23 @@ func (r *PostgresScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderb
 		}
 		return nil, err
 	}
+
 	return &score, nil
+}
+
+func (r *PostgresScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error) {
+
+	rankQuery := `
+				SELECT COUNT(*) + 1 AS rank
+				FROM scores
+				WHERE leaderboard_id = $1 AND duration_index = $2 AND score > $3
+	`
+	var rank int
+	err := r.db.QueryRowContext(ctx, rankQuery, leaderboardID, durationIndex, score).Scan(&rank)
+	if err != nil {
+		return -1, err
+	}
+	return rank, nil
 }
 
 func (r *PostgresScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page,
