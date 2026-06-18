@@ -6,6 +6,7 @@ import (
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/auth"
 	"github.com/AmirSff-Go/leaderboard-service/internal/config"
+	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
 	"github.com/AmirSff-Go/leaderboard-service/internal/repository"
 )
 
@@ -13,6 +14,7 @@ func NewServer(
 	cfg *config.Config,
 	gameRepo repository.GameRepo,
 	leaderboardRepo repository.LeaderboardRepo,
+	scoreRepo repository.ScoreRepo,
 ) *echo.Echo {
 	e := echo.New()
 
@@ -37,8 +39,12 @@ func NewServer(
 
 	gameGroup := e.Group("/leaderboards", gameTokenMiddleware)
 
-	leaderboardHandler := NewLeaderboardHandler(leaderboardRepo)
+	processorFactory := domain.NewScoreProcessorFactory()
+	leaderboardService := domain.NewLeaderboardService(leaderboardRepo, scoreRepo, processorFactory)
+	leaderboardHandler := NewLeaderboardHandler(leaderboardService)
 	gameGroup.POST("", leaderboardHandler.CreateLeaderboard)
+
+	gameGroup.POST("/:name/scores", leaderboardHandler.SubmitScore)
 
 	return e
 }

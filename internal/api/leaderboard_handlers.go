@@ -6,16 +6,15 @@ import (
 	"github.com/labstack/echo/v4"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
-	"github.com/AmirSff-Go/leaderboard-service/internal/repository"
 )
 
 type LeaderboardHandler struct {
-	leaderboardRepo repository.LeaderboardRepo
+	leaderboardService *domain.LeaderboardService
 }
 
-func NewLeaderboardHandler(leaderboardRepo repository.LeaderboardRepo) *LeaderboardHandler {
+func NewLeaderboardHandler(leaderboardService *domain.LeaderboardService) *LeaderboardHandler {
 	return &LeaderboardHandler{
-		leaderboardRepo: leaderboardRepo,
+		leaderboardService: leaderboardService,
 	}
 }
 
@@ -40,18 +39,43 @@ func (h *LeaderboardHandler) CreateLeaderboard(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "invalid type")
 	}
 	game := GetGameFromContext(c)
-	leaderboard := &domain.Leaderboard{
-		GameID:          game.ID,
-		UniqueName:      req.UniqueName,
-		Description:     req.Description,
-		Type:            domain.LeaderboardType(req.Type),
-		IntervalSeconds: req.IntervalSeconds,
-	}
-	if err := h.leaderboardRepo.Create(c.Request().Context(), leaderboard); err != nil {
-		if err == repository.ErrDuplicateLeaderboardName {
-			return respondError(c, http.StatusConflict, "leaderboard name already exists")
+	lbType := domain.LeaderboardType(req.Type)
+	leaderboard, err := h.leaderboardService.CreateLeaderboard(c.Request().Context(), game.ID, req.UniqueName, req.Description, lbType, req.IntervalSeconds)
+	if err != nil {
+		if err == domain.ErrDuplicateLeaderboardName {
+			return respondError(c, http.StatusConflict, "leaderboard name already exists for this game")
 		}
 		return respondError(c, http.StatusInternalServerError, "failed to create leaderboard")
 	}
+
 	return respondOK(c, http.StatusCreated, leaderboard)
+}
+
+type SubmitScoreRequest struct {
+	UserID string `json:"user_id"`
+	Score  int    `json:"score"`
+}
+
+func (h *LeaderboardHandler) SubmitScore(c echo.Context) error {
+	var req SubmitScoreRequest
+	if err := c.Bind(&req); err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid request body")
+	}
+	if req.UserID == "" {
+		return respondError(c, http.StatusBadRequest, "user_id is required")
+	}
+
+	game := GetGameFromContext(c)
+
+	leaderboardName := c.Param("name")
+
+	err := h.leaderboardService.SubmitScore(c.Request().Context(), game.ID, leaderboardName, req.UserID, req.Score)
+	if err != nil {
+		if err == domain.ErrLeaderboardNotFound {
+			return respondError(c, http.StatusNotFound, "leaderboard not found")
+		}
+		return respondError(c, http.StatusInternalServerError, "failed to submit score")
+	}
+
+	return respondOK(c, http.StatusCreated, nil)
 }

@@ -36,7 +36,7 @@ func (r *PostgresLeaderboardRepo) Create(ctx context.Context, leaderboard *domai
 	).Scan(&leaderboard.CreatedAt, &leaderboard.UpdatedAt)
 	if err != nil {
 		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
-			return ErrDuplicateLeaderboardName
+			return domain.ErrDuplicateLeaderboardName
 		}
 		return err
 	}
@@ -62,7 +62,7 @@ func (r *PostgresLeaderboardRepo) GetByGameAndName(ctx context.Context, gameID u
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, ErrLeaderboardNotFound
+			return nil, domain.ErrLeaderboardNotFound
 		}
 		return nil, err
 	}

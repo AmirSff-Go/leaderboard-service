@@ -31,9 +31,10 @@ func main() {
 	// Initialize repositories
 	gameRepo := repository.NewPostgresGameRepo(db)
 	leaderboardRepo := repository.NewPostgresLeaderboardRepo(db)
+	scoreRepo := repository.NewPostgresScoreRepo(db)
 
 	// Setup and start server
-	server := api.NewServer(cfg, gameRepo, leaderboardRepo)
+	server := api.NewServer(cfg, gameRepo, leaderboardRepo, scoreRepo)
 	fmt.Printf("🚀 Starting server on port %s\n", cfg.ServerPort)
 	server.Logger.Fatal(server.Start(":" + cfg.ServerPort))
 }

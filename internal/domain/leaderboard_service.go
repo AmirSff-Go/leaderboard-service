@@ -11,6 +11,7 @@ var ErrScoreNotFound = errors.New("score not found")
 
 type LeaderboardRepository interface {
 	GetByGameAndName(ctx context.Context, gameID uuid.UUID, uniqueName string) (*Leaderboard, error)
+	Create(ctx context.Context, leaderboard *Leaderboard) error
 }
 
 type ScoreRepository interface {
@@ -18,21 +19,21 @@ type ScoreRepository interface {
 	GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) (*Score, error)
 }
 
-type ScoreService struct {
+type LeaderboardService struct {
 	leaderboardRepo  LeaderboardRepository
 	scoreRepo        ScoreRepository
 	processorFactory ScoreProcessorFactory
 }
 
-func NewScoreService(leaderboardRepo LeaderboardRepository, scoreRepo ScoreRepository, processorFactory ScoreProcessorFactory) *ScoreService {
-	return &ScoreService{
+func NewLeaderboardService(leaderboardRepo LeaderboardRepository, scoreRepo ScoreRepository, processorFactory ScoreProcessorFactory) *LeaderboardService {
+	return &LeaderboardService{
 		leaderboardRepo:  leaderboardRepo,
 		scoreRepo:        scoreRepo,
 		processorFactory: processorFactory,
 	}
 }
 
-func (s *ScoreService) SubmitScore(ctx context.Context, gameID uuid.UUID, leaderboardName string, userID string, newScore int) error {
+func (s *LeaderboardService) SubmitScore(ctx context.Context, gameID uuid.UUID, leaderboardName string, userID string, newScore int) error {
 	leaderboard, err := s.leaderboardRepo.GetByGameAndName(ctx, gameID, leaderboardName)
 	if err != nil {
 		return err
@@ -69,4 +70,19 @@ func (s *ScoreService) SubmitScore(ctx context.Context, gameID uuid.UUID, leader
 	}
 
 	return nil
+}
+
+func (s *LeaderboardService) CreateLeaderboard(ctx context.Context, gameID uuid.UUID, uniqueName, description string, lbType LeaderboardType, intervalSeconds int) (*Leaderboard, error) {
+	leaderboard := &Leaderboard{
+		GameID:          gameID,
+		UniqueName:      uniqueName,
+		Description:     description,
+		Type:            lbType,
+		IntervalSeconds: intervalSeconds,
+	}
+	err := s.leaderboardRepo.Create(ctx, leaderboard)
+	if err != nil {
+		return nil, err
+	}
+	return leaderboard, nil
 }

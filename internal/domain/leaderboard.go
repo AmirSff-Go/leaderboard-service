@@ -1,12 +1,18 @@
 package domain
 
 import (
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
 )
 
 type LeaderboardType string
+
+var (
+	ErrLeaderboardNotFound      = errors.New("leaderboard not found")
+	ErrDuplicateLeaderboardName = errors.New("leaderboard name already exists for this game")
+)
 
 const (
 	Record   LeaderboardType = "record"

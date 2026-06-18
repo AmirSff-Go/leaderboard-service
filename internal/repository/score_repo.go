@@ -12,7 +12,7 @@ type ScoreRepo interface {
 	Upsert(ctx context.Context, score *domain.Score) error
 
 	// Get the current score for a user in a leaderboard
-	GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID uuid.UUID, durationIndex int) (*domain.Score, error)
+	GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) (*domain.Score, error)
 
 	// Get ranking (pagination)
 	GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page, pageSize int) ([]*domain.Score, error)
