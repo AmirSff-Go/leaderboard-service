@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/api"
 	"github.com/AmirSff-Go/leaderboard-service/internal/cache"
@@ -29,6 +30,10 @@ func main() {
 	if err := db.Ping(); err != nil {
 		panic(err)
 	}
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
+	db.SetConnMaxIdleTime(2 * time.Minute)
 	fmt.Println("✅ Connected to PostgreSQL")
 
 	// Initialize repositories
