@@ -1,5 +1,5 @@
 -- Table 1: games (no dependencies)
-CREATE TABLE games (
+CREATE TABLE IF NOT EXISTS games (
     id UUID PRIMARY KEY,
     name VARCHAR NOT NULL UNIQUE,
     description TEXT,
@@ -9,9 +9,12 @@ CREATE TABLE games (
 );
 
 -- Table 2: leaderboards (depends on games)
-CREATE TYPE leaderboard_type AS ENUM ('Record', 'Additive', 'OneTime');
+DO $$ BEGIN
+    CREATE TYPE leaderboard_type AS ENUM ('record', 'additive', 'onetime');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 
-CREATE TABLE leaderboards (
+CREATE TABLE IF NOT EXISTS leaderboards (
     id UUID PRIMARY KEY,
     game_id UUID NOT NULL,
     unique_name VARCHAR NOT NULL,
@@ -25,7 +28,7 @@ CREATE TABLE leaderboards (
 );
 
 -- Table 3: scores (depends on leaderboards)
-CREATE TABLE scores (
+CREATE TABLE IF NOT EXISTS scores (
     id UUID PRIMARY KEY,
     leaderboard_id UUID NOT NULL,
     user_id VARCHAR NOT NULL,
@@ -38,11 +41,6 @@ CREATE TABLE scores (
 );
 
 -- Indexes for performance
--- Index for ranking queries (get top scores by leaderboard + duration)
-CREATE INDEX idx_scores_leaderboard_duration_score ON scores (leaderboard_id, duration_index, score DESC);
-
--- Index for user's historical scores
-CREATE INDEX idx_scores_leaderboard_user_duration ON scores (leaderboard_id, user_id, duration_index);
-
--- Index for user's score in a specific period
-CREATE INDEX idx_scores_leaderboard_user_duration_score ON scores (leaderboard_id, user_id, duration_index, score);
+CREATE INDEX IF NOT EXISTS idx_scores_leaderboard_duration_score ON scores (leaderboard_id, duration_index, score DESC);
+CREATE INDEX IF NOT EXISTS idx_scores_leaderboard_user_duration ON scores (leaderboard_id, user_id, duration_index);
+CREATE INDEX IF NOT EXISTS idx_scores_leaderboard_user_duration_score ON scores (leaderboard_id, user_id, duration_index, score);

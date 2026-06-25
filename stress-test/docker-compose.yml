@@ -1,0 +1,83 @@
+name: leaderboard-stress
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: leaderboard_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d leaderboard_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: stress-test/Dockerfile
+    command: ["./migrate"]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/leaderboard_db?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: stress-test-jwt-secret-32-chars-ok
+      ADMIN_PASSWORD: admin123
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  leaderboard:
+    build:
+      context: ..
+      dockerfile: stress-test/Dockerfile
+    command: ["./server"]
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/leaderboard_db?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: stress-test-jwt-secret-32-chars-ok
+      ADMIN_PASSWORD: admin123
+      SERVER_PORT: "8080"
+      LOG_LEVEL: warn
+    ports:
+      - "8080:8080"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  k6:
+    image: grafana/k6:latest
+    profiles: ["test"]
+    volumes:
+      - ./k6:/scripts
+    environment:
+      BASE_URL: http://leaderboard:8080
+    command: run --summary-export=/scripts/summary.json /scripts/load_test.js
+    depends_on:
+      leaderboard:
+        condition: service_healthy

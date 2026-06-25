@@ -21,7 +21,6 @@ func main() {
 		panic(err)
 	}
 	defer db.Close()
-	defer db.Close()
 
 	// Step 2: Read migration file/
 	// Read the file internal/repository/migrations/001_init_schema.sql

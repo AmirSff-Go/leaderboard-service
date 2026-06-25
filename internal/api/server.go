@@ -23,8 +23,10 @@ func NewServer(
 ) *echo.Echo {
 	e := echo.New()
 
-	// Middleware
-	e.Use(middleware.Logger())
+	// Access log only at verbose level — it's expensive under high load.
+	if cfg.LogLevel == "verbose" {
+		e.Use(middleware.Logger())
+	}
 	e.Use(middleware.Recover())
 
 	// Initialize auth

@@ -17,6 +17,9 @@ type Config struct {
 	RedisURL      string
 	JWTSecret     string
 	ServerPort    string
+	// LogLevel controls verbosity: verbose | info | warn | error
+	// "verbose" also enables per-request access logging.
+	LogLevel string
 }
 
 func Load() (*Config, error) {
@@ -38,7 +41,14 @@ func Load() (*Config, error) {
 	}
 	serverPort := os.Getenv("SERVER_PORT")
 	if serverPort == "" {
-		serverPort = "8080" // default port
+		serverPort = "8080"
+	}
+	logLevel := os.Getenv("LOG_LEVEL")
+	switch logLevel {
+	case "verbose", "info", "warn", "error":
+		// valid
+	default:
+		logLevel = "info"
 	}
 	return &Config{
 		AdminPassword: adminPassword,
@@ -46,6 +56,7 @@ func Load() (*Config, error) {
 		RedisURL:      redisURL,
 		JWTSecret:     jwtSecret,
 		ServerPort:    serverPort,
+		LogLevel:      logLevel,
 	}, nil
 }
 

@@ -33,6 +33,20 @@ func run() error {
 		return err
 	}
 
+	// Configure global slog level from config.
+	var slogLevel slog.Level
+	switch cfg.LogLevel {
+	case "verbose":
+		slogLevel = slog.LevelDebug
+	case "warn":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default: // "info"
+		slogLevel = slog.LevelInfo
+	}
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slogLevel})))
+
 	db, err := connectPostgres(cfg.DatabaseURL)
 	if err != nil {
 		return err
