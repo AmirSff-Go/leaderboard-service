@@ -4,6 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/api"
@@ -54,6 +58,23 @@ func main() {
 		// Setup and start server
 		server = api.NewServer(cfg, gameRepo, leaderboardRepo, cachedScoreRepo, db, redisClient)
 	}
+
 	fmt.Printf("🚀 Starting server on port %s\n", cfg.ServerPort)
-	server.Logger.Fatal(server.Start(":" + cfg.ServerPort))
+	go func() {
+		if err := server.Start(":" + cfg.ServerPort); err != nil && err != http.ErrServerClosed {
+			server.Logger.Fatal(err)
+		}
+	}()
+
+	// Block until SIGTERM or SIGINT is received
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
+	<-quit
+
+	// Shut down gracefully with a 30s timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	if err := server.Shutdown(ctx); err != nil {
+		server.Logger.Fatal(err)
+	}
 }
