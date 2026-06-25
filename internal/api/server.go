@@ -1,8 +1,11 @@
 package api
 
 import (
+	"database/sql"
+
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/auth"
 	"github.com/AmirSff-Go/leaderboard-service/internal/config"
@@ -15,6 +18,8 @@ func NewServer(
 	gameRepo repository.GameRepo,
 	leaderboardRepo repository.LeaderboardRepo,
 	scoreRepo repository.ScoreRepo,
+	db *sql.DB,
+	redisClient *redis.Client,
 ) *echo.Echo {
 	e := echo.New()
 
@@ -33,6 +38,11 @@ func NewServer(
 	adminGroup.POST("/games", adminHandler.RegisterGame)
 	adminGroup.POST("/games/:id/refresh-token", adminHandler.RefreshGameToken)
 	adminGroup.PATCH("/games/:id", adminHandler.EditGame)
+
+	// Health handlers
+	healthHandler := NewHealthHandler(db, redisClient)
+	e.GET("/health/live", healthHandler.Live)
+	e.GET("/health/ready", healthHandler.Ready)
 
 	// Game handlers (require valid game token)
 	gameTokenMiddleware := GameTokenMiddleware(tokenGenerator, gameRepo)

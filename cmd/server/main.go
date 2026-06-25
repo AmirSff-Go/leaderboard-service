@@ -47,12 +47,12 @@ func main() {
 	var server *echo.Echo
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		fmt.Printf("Warning: Redis unavailable: %v\n", err)
-		server = api.NewServer(cfg, gameRepo, leaderboardRepo, scoreRepo) // Fallback to non-cached repo
+		server = api.NewServer(cfg, gameRepo, leaderboardRepo, scoreRepo, db, nil) // Fallback to non-cached repo
 	} else {
 		cachedScoreRepo := repository.NewCachedScoreRepo(scoreRepo, redisClient)
 
 		// Setup and start server
-		server = api.NewServer(cfg, gameRepo, leaderboardRepo, cachedScoreRepo)
+		server = api.NewServer(cfg, gameRepo, leaderboardRepo, cachedScoreRepo, db, redisClient)
 	}
 	fmt.Printf("🚀 Starting server on port %s\n", cfg.ServerPort)
 	server.Logger.Fatal(server.Start(":" + cfg.ServerPort))
