@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
 	"github.com/google/uuid"
@@ -61,7 +62,7 @@ func (r *PostgresLeaderboardRepo) GetByGameAndName(ctx context.Context, gameID u
 		&leaderboard.UpdatedAt,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrLeaderboardNotFound
 		}
 		return nil, err

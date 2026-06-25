@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
 	"github.com/google/uuid"
@@ -54,7 +55,7 @@ func (r *PostgresScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderb
 		&score.UpdatedAt,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrScoreNotFound
 		}
 		return nil, err

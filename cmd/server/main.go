@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -61,7 +62,7 @@ func main() {
 
 	fmt.Printf("🚀 Starting server on port %s\n", cfg.ServerPort)
 	go func() {
-		if err := server.Start(":" + cfg.ServerPort); err != nil && err != http.ErrServerClosed {
+		if err := server.Start(":" + cfg.ServerPort); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			server.Logger.Fatal(err)
 		}
 	}()

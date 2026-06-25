@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -103,7 +104,7 @@ func (h *AdminHandler) RefreshGameToken(c echo.Context) error {
 	}
 
 	game, err := h.gameRepo.GetByID(context.Background(), gameID)
-	if err == repository.ErrGameNotFound {
+	if errors.Is(err, repository.ErrGameNotFound) {
 		return respondError(c, http.StatusNotFound, "game not found")
 	}
 	if err != nil {
@@ -155,7 +156,7 @@ func (h *AdminHandler) EditGame(c echo.Context) error {
 	}
 
 	game, err := h.gameRepo.GetByID(context.Background(), gameID)
-	if err == repository.ErrGameNotFound {
+	if errors.Is(err, repository.ErrGameNotFound) {
 		return respondError(c, http.StatusNotFound, "game not found")
 	}
 	if err != nil {

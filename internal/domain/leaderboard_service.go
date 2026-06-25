@@ -51,7 +51,7 @@ func (s *LeaderboardService) SubmitScore(ctx context.Context, gameID uuid.UUID, 
 	durationIndex := CurrentDurationIndex(leaderboard)
 
 	existingScore, err := s.scoreRepo.GetByLeaderboardAndUser(ctx, leaderboard.ID, userID, durationIndex)
-	if err != nil && err != ErrScoreNotFound {
+	if err != nil && !errors.Is(err, ErrScoreNotFound) {
 		return err
 	}
 
@@ -128,7 +128,7 @@ func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, 
 	if userID != "" {
 		userScore, err := s.scoreRepo.GetByLeaderboardAndUser(ctx, leaderboard.ID, userID, durationIndex)
 		if err != nil {
-			if err == ErrScoreNotFound {
+			if errors.Is(err, ErrScoreNotFound) {
 				userEntry = nil
 			} else {
 				return nil, 0, nil, err

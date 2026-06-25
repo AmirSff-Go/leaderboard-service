@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/cache"
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
@@ -35,7 +36,7 @@ func (r *CachedScoreRepo) Upsert(ctx context.Context, score *domain.Score) error
 	}).Result()
 	if err != nil {
 		// Log the error but don't fail the request
-		fmt.Printf("Failed to update Redis cache: %v\n", err)
+		slog.Error("Failed to update Redis cache", "error", err)
 	}
 	return nil
 }
@@ -54,7 +55,7 @@ func (r *CachedScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UU
 	count, err := r.redis.ZCount(ctx, key, fmt.Sprintf("(%d", score), "+inf").Result()
 	if err != nil {
 		// Log the error and fallback to Postgres
-		fmt.Printf("Failed to get rank from Redis cache: %v\n", err)
+		slog.Error("Failed to get rank from Redis cache", "error", err)
 		return r.postgres.GetUserRank(ctx, leaderboardID, durationIndex, score)
 	}
 	return int(count) + 1, nil
@@ -68,7 +69,7 @@ func (r *CachedScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUI
 	results, err := r.redis.ZRevRangeWithScores(ctx, key, start, stop).Result()
 	if err != nil {
 		// Log the error and fallback to Postgres
-		fmt.Printf("Failed to get ranking from Redis cache: %v\n", err)
+		slog.Error("Failed to get ranking from Redis cache", "error", err)
 		return r.postgres.GetRanking(ctx, leaderboardID, durationIndex, page, pageSize)
 	}
 
@@ -99,7 +100,7 @@ func (r *CachedScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID 
 	key := cache.LeaderboardKey(leaderboardID, durationIndex)
 	count, err := r.redis.ZCard(ctx, key).Result()
 	if err != nil {
-		fmt.Printf("Failed to get count from Redis cache: %v\n", err)
+		slog.Error("Failed to get count from Redis cache", "error", err)
 		return r.postgres.CountByLeaderboard(ctx, leaderboardID, durationIndex)
 	}
 	if count == 0 {

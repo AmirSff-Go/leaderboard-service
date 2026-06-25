@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -50,7 +51,7 @@ func GameTokenMiddleware(
 			}
 
 			game, err := gameRepo.GetByID(context.Background(), gameID)
-			if err == repository.ErrGameNotFound {
+			if errors.Is(err, repository.ErrGameNotFound) {
 				return respondError(c, http.StatusUnauthorized, "game not found")
 			}
 			if err != nil {

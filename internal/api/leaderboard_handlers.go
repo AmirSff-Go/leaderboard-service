@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -43,7 +44,7 @@ func (h *LeaderboardHandler) CreateLeaderboard(c echo.Context) error {
 	lbType := domain.LeaderboardType(req.Type)
 	leaderboard, err := h.leaderboardService.CreateLeaderboard(c.Request().Context(), game.ID, req.UniqueName, req.Description, lbType, req.IntervalSeconds)
 	if err != nil {
-		if err == domain.ErrDuplicateLeaderboardName {
+		if errors.Is(err, domain.ErrDuplicateLeaderboardName) {
 			return respondError(c, http.StatusConflict, "leaderboard name already exists for this game")
 		}
 		return respondError(c, http.StatusInternalServerError, "failed to create leaderboard")
@@ -72,7 +73,7 @@ func (h *LeaderboardHandler) SubmitScore(c echo.Context) error {
 
 	err := h.leaderboardService.SubmitScore(c.Request().Context(), game.ID, leaderboardName, req.UserID, req.Score)
 	if err != nil {
-		if err == domain.ErrLeaderboardNotFound {
+		if errors.Is(err, domain.ErrLeaderboardNotFound) {
 			return respondError(c, http.StatusNotFound, "leaderboard not found")
 		}
 		return respondError(c, http.StatusInternalServerError, "failed to submit score")
@@ -100,7 +101,7 @@ func (h *LeaderboardHandler) GetRankings(c echo.Context) error {
 
 	rankings, total, userEntry, err := h.leaderboardService.GetRankings(c.Request().Context(), game.ID, leaderboardName, page, pageSize, userId, durationIndex)
 	if err != nil {
-		if err == domain.ErrLeaderboardNotFound {
+		if errors.Is(err, domain.ErrLeaderboardNotFound) {
 			return respondError(c, http.StatusNotFound, "leaderboard not found")
 		}
 		return respondError(c, http.StatusInternalServerError, "failed to get rankings")
