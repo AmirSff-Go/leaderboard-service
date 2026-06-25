@@ -97,7 +97,7 @@ func TestAdditiveScoreProcessor(t *testing.T) {
 		{
 			name:         "first submission saves new score",
 			currentScore: nil,
-			newScore:     101,
+			newScore:     100,
 			wantFinal:    100,
 		},
 		{
