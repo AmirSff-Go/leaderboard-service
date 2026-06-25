@@ -68,6 +68,34 @@ graph TD
 
 ---
 
+## API Documentation
+
+Interactive Swagger UI is available two ways:
+
+### Live (same port as the app)
+
+Set `SWAGGER_ENABLED=true` in `.env`, then start the server. The UI is served on the same port as the API — no extra port needed:
+
+```
+http://localhost:8080/swagger/index.html
+```
+
+Use the **Authorize** button (🔒) to paste your game JWT (`Bearer <token>`) once. All leaderboard endpoints will carry it automatically. This is disabled by default in production (`SWAGGER_ENABLED=false`).
+
+### GitHub Pages (static, always-on)
+
+Every push to `master` regenerates the spec and deploys a read-only Swagger UI to GitHub Pages. To enable it:
+
+1. Go to **Settings → Pages** in your GitHub repo
+2. Set Source to **GitHub Actions**
+3. Push — the `API Docs → GitHub Pages` workflow handles the rest
+
+The published URL will be `https://<org>.github.io/<repo>/`.
+
+> The static page documents all endpoints but the "Try it out" button is disabled — it only works against a running server.
+
+---
+
 ## Quick Start
 
 ### Prerequisites

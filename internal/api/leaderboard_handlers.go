@@ -27,6 +27,21 @@ type CreateLeaderboardRequest struct {
 	IntervalSeconds int    `json:"interval_seconds"`
 }
 
+// @Summary     Create a leaderboard
+// @Description Creates a new leaderboard scoped to the authenticated game. unique_name must be unique within the game.
+// @Description Type options: record (personal best), additive (cumulative total), onetime (first submission only).
+// @Description Set interval_seconds to 0 for all-time, 86400 for daily, 604800 for weekly.
+// @Tags        Leaderboards
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       request body CreateLeaderboardRequest true "Leaderboard configuration"
+// @Success     201 {object} domain.Leaderboard "leaderboard created"
+// @Failure     400 {object} ErrorResponse "missing fields or invalid type"
+// @Failure     401 {object} ErrorResponse "invalid or missing token"
+// @Failure     409 {object} ErrorResponse "leaderboard name already exists for this game"
+// @Failure     500 {object} ErrorResponse
+// @Router      /leaderboards [post]
 func (h *LeaderboardHandler) CreateLeaderboard(c echo.Context) error {
 	var req CreateLeaderboardRequest
 	if err := c.Bind(&req); err != nil {
@@ -58,6 +73,20 @@ type SubmitScoreRequest struct {
 	Score  int    `json:"score"`
 }
 
+// @Summary     Submit a score
+// @Description Records a score for a user. Behavior depends on leaderboard type: record keeps the personal best, additive accumulates all submissions, onetime ignores submissions after the first.
+// @Tags        Leaderboards
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       name    path string           true "Leaderboard unique name"
+// @Param       request body SubmitScoreRequest true "Score submission"
+// @Success     201 "score recorded"
+// @Failure     400 {object} ErrorResponse "missing user_id"
+// @Failure     401 {object} ErrorResponse "invalid or missing token"
+// @Failure     404 {object} ErrorResponse "leaderboard not found"
+// @Failure     500 {object} ErrorResponse
+// @Router      /leaderboards/{name}/scores [post]
 func (h *LeaderboardHandler) SubmitScore(c echo.Context) error {
 	var req SubmitScoreRequest
 	if err := c.Bind(&req); err != nil {
@@ -90,6 +119,21 @@ type GetRankingsResponseBody struct {
 	UserEntry *domain.ScoreObject   `json:"user_entry,omitempty"`
 }
 
+// @Summary     Get rankings
+// @Description Returns paginated rankings for a leaderboard. Optionally fetches the requesting user's rank via user_id.
+// @Tags        Leaderboards
+// @Produce     json
+// @Security    BearerAuth
+// @Param       name           path  string true  "Leaderboard unique name"
+// @Param       page           query int    false "Page number (default: 1)"
+// @Param       page_size      query int    false "Results per page (default: 20)"
+// @Param       user_id        query string false "Include this user's rank and score in user_entry"
+// @Param       duration_index query int    false "Time bucket (-1 = current period, 0+ = historical)"
+// @Success     200 {object} GetRankingsResponseBody
+// @Failure     401 {object} ErrorResponse "invalid or missing token"
+// @Failure     404 {object} ErrorResponse "leaderboard not found"
+// @Failure     500 {object} ErrorResponse
+// @Router      /leaderboards/{name}/rankings [get]
 func (h *LeaderboardHandler) GetRankings(c echo.Context) error {
 	leaderboardName := c.Param("name")
 	page, _ := GetIntQueryParam(c, "page", 1)

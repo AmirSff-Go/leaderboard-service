@@ -20,6 +20,8 @@ type Config struct {
 	// LogLevel controls verbosity: verbose | info | warn | error
 	// "verbose" also enables per-request access logging.
 	LogLevel string
+	// SwaggerEnabled mounts the Swagger UI at /swagger/index.html.
+	SwaggerEnabled bool
 }
 
 func Load() (*Config, error) {
@@ -51,12 +53,13 @@ func Load() (*Config, error) {
 		logLevel = "info"
 	}
 	return &Config{
-		AdminPassword: adminPassword,
-		DatabaseURL:   databaseURL,
-		RedisURL:      redisURL,
-		JWTSecret:     jwtSecret,
-		ServerPort:    serverPort,
-		LogLevel:      logLevel,
+		AdminPassword:  adminPassword,
+		DatabaseURL:    databaseURL,
+		RedisURL:       redisURL,
+		JWTSecret:      jwtSecret,
+		ServerPort:     serverPort,
+		LogLevel:       logLevel,
+		SwaggerEnabled: os.Getenv("SWAGGER_ENABLED") == "true",
 	}, nil
 }
 

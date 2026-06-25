@@ -1,0 +1,428 @@
+basePath: /
+definitions:
+  api.CreateLeaderboardRequest:
+    properties:
+      description:
+        type: string
+      interval_seconds:
+        type: integer
+      type:
+        type: string
+      unique_name:
+        type: string
+    type: object
+  api.EditGameRequest:
+    properties:
+      admin_password:
+        type: string
+      game_desc:
+        type: string
+      game_name:
+        type: string
+    type: object
+  api.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  api.GameResponse:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      token:
+        description: Only in register/refresh responses
+        type: string
+      updated_at:
+        type: string
+    type: object
+  api.GetRankingsResponseBody:
+    properties:
+      page:
+        type: integer
+      page_size:
+        type: integer
+      rankings:
+        items:
+          $ref: '#/definitions/domain.ScoreObject'
+        type: array
+      total:
+        type: integer
+      user_entry:
+        $ref: '#/definitions/domain.ScoreObject'
+    type: object
+  api.RefreshTokenRequest:
+    properties:
+      admin_password:
+        type: string
+      game_id:
+        type: string
+    type: object
+  api.RegisterGameRequest:
+    properties:
+      admin_password:
+        type: string
+      game_desc:
+        type: string
+      game_name:
+        type: string
+    type: object
+  api.SubmitScoreRequest:
+    properties:
+      score:
+        type: integer
+      user_id:
+        type: string
+    type: object
+  domain.Leaderboard:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      game_id:
+        type: string
+      id:
+        type: string
+      interval_seconds:
+        type: integer
+      type:
+        $ref: '#/definitions/domain.LeaderboardType'
+      unique_name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  domain.LeaderboardType:
+    enum:
+    - record
+    - additive
+    - onetime
+    type: string
+    x-enum-varnames:
+    - Record
+    - Additive
+    - OneTime
+  domain.ScoreObject:
+    properties:
+      rank:
+        type: integer
+      score:
+        type: integer
+      user_id:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: |-
+    Production-ready leaderboard backend for game centers.
+    Real-time rankings backed by Redis sorted sets with JWT game authentication.
+  title: Leaderboard Service API
+  version: "1.0"
+paths:
+  /admin/games:
+    post:
+      consumes:
+      - application/json
+      description: Creates a new game and returns a signed JWT. Use the token in the
+        Authorization header for all leaderboard endpoints.
+      parameters:
+      - description: Game registration details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.RegisterGameRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: game created
+          schema:
+            $ref: '#/definitions/api.GameResponse'
+        "400":
+          description: invalid request or missing game_name
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: wrong admin password
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Register a game
+      tags:
+      - Admin
+  /admin/games/{id}:
+    patch:
+      consumes:
+      - application/json
+      description: Updates name and/or description for a game. game_name is optional;
+        omit to keep the current value.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.EditGameRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: game updated
+          schema:
+            $ref: '#/definitions/api.GameResponse'
+        "400":
+          description: invalid game id
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: wrong admin password
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: game not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Update game details
+      tags:
+      - Admin
+  /admin/games/{id}/refresh-token:
+    post:
+      consumes:
+      - application/json
+      description: Revokes the current JWT and issues a new one. Any client using
+        the old token is rejected immediately.
+      parameters:
+      - description: Game UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Admin credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.RefreshTokenRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: new token issued
+          schema:
+            $ref: '#/definitions/api.GameResponse'
+        "400":
+          description: invalid game id
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: wrong admin password
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: game not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      summary: Refresh game token
+      tags:
+      - Admin
+  /health/live:
+    get:
+      description: Always returns 200. Used by Kubernetes to confirm the process is
+        running.
+      responses:
+        "200":
+          description: alive
+      summary: Liveness probe
+      tags:
+      - Health
+  /health/ready:
+    get:
+      description: Pings PostgreSQL and Redis. Returns 503 if either dependency is
+        unreachable.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: all dependencies healthy
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: one or more dependencies unreachable
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Readiness probe
+      tags:
+      - Health
+  /leaderboards:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        Creates a new leaderboard scoped to the authenticated game. unique_name must be unique within the game.
+        Type options: record (personal best), additive (cumulative total), onetime (first submission only).
+        Set interval_seconds to 0 for all-time, 86400 for daily, 604800 for weekly.
+      parameters:
+      - description: Leaderboard configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.CreateLeaderboardRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: leaderboard created
+          schema:
+            $ref: '#/definitions/domain.Leaderboard'
+        "400":
+          description: missing fields or invalid type
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: invalid or missing token
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "409":
+          description: leaderboard name already exists for this game
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a leaderboard
+      tags:
+      - Leaderboards
+  /leaderboards/{name}/rankings:
+    get:
+      description: Returns paginated rankings for a leaderboard. Optionally fetches
+        the requesting user's rank via user_id.
+      parameters:
+      - description: Leaderboard unique name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Results per page (default: 20)'
+        in: query
+        name: page_size
+        type: integer
+      - description: Include this user's rank and score in user_entry
+        in: query
+        name: user_id
+        type: string
+      - description: Time bucket (-1 = current period, 0+ = historical)
+        in: query
+        name: duration_index
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.GetRankingsResponseBody'
+        "401":
+          description: invalid or missing token
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: leaderboard not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get rankings
+      tags:
+      - Leaderboards
+  /leaderboards/{name}/scores:
+    post:
+      consumes:
+      - application/json
+      description: 'Records a score for a user. Behavior depends on leaderboard type:
+        record keeps the personal best, additive accumulates all submissions, onetime
+        ignores submissions after the first.'
+      parameters:
+      - description: Leaderboard unique name
+        in: path
+        name: name
+        required: true
+        type: string
+      - description: Score submission
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.SubmitScoreRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: score recorded
+        "400":
+          description: missing user_id
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: invalid or missing token
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: leaderboard not found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Submit a score
+      tags:
+      - Leaderboards
+securityDefinitions:
+  BearerAuth:
+    description: 'Enter your game JWT as: Bearer {token}'
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

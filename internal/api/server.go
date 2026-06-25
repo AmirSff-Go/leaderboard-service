@@ -6,6 +6,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
 	"github.com/redis/go-redis/v9"
+	echoSwagger "github.com/swaggo/echo-swagger"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/auth"
 	"github.com/AmirSff-Go/leaderboard-service/internal/config"
@@ -28,6 +29,10 @@ func NewServer(
 		e.Use(middleware.Logger())
 	}
 	e.Use(middleware.Recover())
+
+	if cfg.SwaggerEnabled {
+		e.GET("/swagger/*", echoSwagger.WrapHandler)
+	}
 
 	// Initialize auth
 	adminAuth := auth.NewAdminAuth(cfg.AdminPassword)

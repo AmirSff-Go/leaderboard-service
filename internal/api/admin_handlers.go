@@ -38,8 +38,17 @@ type RegisterGameRequest struct {
 	GameDesc      string `json:"game_desc"`
 }
 
-// RegisterGame creates a new game and returns a JWT token.
-// POST /admin/games
+// @Summary     Register a game
+// @Description Creates a new game and returns a signed JWT. Use the token in the Authorization header for all leaderboard endpoints.
+// @Tags        Admin
+// @Accept      json
+// @Produce     json
+// @Param       request body RegisterGameRequest true "Game registration details"
+// @Success     201 {object} GameResponse "game created"
+// @Failure     400 {object} ErrorResponse "invalid request or missing game_name"
+// @Failure     401 {object} ErrorResponse "wrong admin password"
+// @Failure     500 {object} ErrorResponse
+// @Router      /admin/games [post]
 func (h *AdminHandler) RegisterGame(c echo.Context) error {
 	var req RegisterGameRequest
 	if err := c.Bind(&req); err != nil {
@@ -86,8 +95,19 @@ type RefreshTokenRequest struct {
 	GameID        string `json:"game_id"`
 }
 
-// RefreshGameToken increments token_version and returns a new JWT token.
-// POST /admin/games/:id/refresh-token
+// @Summary     Refresh game token
+// @Description Revokes the current JWT and issues a new one. Any client using the old token is rejected immediately.
+// @Tags        Admin
+// @Accept      json
+// @Produce     json
+// @Param       id      path string              true "Game UUID"
+// @Param       request body RefreshTokenRequest true "Admin credentials"
+// @Success     200 {object} GameResponse "new token issued"
+// @Failure     400 {object} ErrorResponse "invalid game id"
+// @Failure     401 {object} ErrorResponse "wrong admin password"
+// @Failure     404 {object} ErrorResponse "game not found"
+// @Failure     500 {object} ErrorResponse
+// @Router      /admin/games/{id}/refresh-token [post]
 func (h *AdminHandler) RefreshGameToken(c echo.Context) error {
 	var req RefreshTokenRequest
 	if err := c.Bind(&req); err != nil {
@@ -138,8 +158,19 @@ type EditGameRequest struct {
 	GameDesc      string `json:"game_desc"`
 }
 
-// EditGame updates game name and description.
-// PATCH /admin/games/:id
+// @Summary     Update game details
+// @Description Updates name and/or description for a game. game_name is optional; omit to keep the current value.
+// @Tags        Admin
+// @Accept      json
+// @Produce     json
+// @Param       id      path string         true "Game UUID"
+// @Param       request body EditGameRequest true "Fields to update"
+// @Success     200 {object} GameResponse "game updated"
+// @Failure     400 {object} ErrorResponse "invalid game id"
+// @Failure     401 {object} ErrorResponse "wrong admin password"
+// @Failure     404 {object} ErrorResponse "game not found"
+// @Failure     500 {object} ErrorResponse
+// @Router      /admin/games/{id} [patch]
 func (h *AdminHandler) EditGame(c echo.Context) error {
 	var req EditGameRequest
 	if err := c.Bind(&req); err != nil {

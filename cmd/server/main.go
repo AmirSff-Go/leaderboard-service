@@ -1,3 +1,15 @@
+// @title           Leaderboard Service API
+// @version         1.0
+// @description     Production-ready leaderboard backend for game centers.
+// @description     Real-time rankings backed by Redis sorted sets with JWT game authentication.
+// @host            localhost:8080
+// @BasePath        /
+//
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Enter your game JWT as: Bearer {token}
+
 package main
 
 import (
@@ -11,6 +23,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/AmirSff-Go/leaderboard-service/docs"
 	"github.com/AmirSff-Go/leaderboard-service/internal/api"
 	"github.com/AmirSff-Go/leaderboard-service/internal/cache"
 	"github.com/AmirSff-Go/leaderboard-service/internal/config"

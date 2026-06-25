@@ -20,12 +20,22 @@ func NewHealthHandler(db *sql.DB, redisClient *redis.Client) *HealthHandler {
 	}
 }
 
-// GET /health/live → always 200
+// @Summary     Liveness probe
+// @Description Always returns 200. Used by Kubernetes to confirm the process is running.
+// @Tags        Health
+// @Success     200 "alive"
+// @Router      /health/live [get]
 func (h *HealthHandler) Live(c echo.Context) error {
 	return c.NoContent(http.StatusOK)
 }
 
-// GET /health/ready → pings db + redis, returns 200 or 503
+// @Summary     Readiness probe
+// @Description Pings PostgreSQL and Redis. Returns 503 if either dependency is unreachable.
+// @Tags        Health
+// @Produce     json
+// @Success     200 {object} map[string]string "all dependencies healthy"
+// @Failure     503 {object} map[string]string "one or more dependencies unreachable"
+// @Router      /health/ready [get]
 func (h *HealthHandler) Ready(c echo.Context) error {
 	status := map[string]string{
 		"db":    "ok",
