@@ -3,6 +3,7 @@ package domain_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
@@ -129,6 +130,53 @@ func TestLeaderboardService_SubmitScore(t *testing.T) {
 		bob, _ := scoreRepo.GetByLeaderboardAndUser(ctx, lb.ID, "bob", 0)
 		assert.Equal(t, 100, alice.Score)
 		assert.Equal(t, 200, bob.Score)
+	})
+
+	// Regression coverage for the read-decide-write race: concurrent submissions for the same
+	// user/leaderboard/period used to be able to read the same stale "current" score and clobber
+	// or drop each other's write. SubmitScoreAtomic must serialize these so no update is lost.
+	t.Run("concurrent additive submissions from the same user do not lose updates", func(t *testing.T) {
+		svc, lbRepo, scoreRepo := newTestService()
+		lb := seedLeaderboard(ctx, lbRepo, gameID, "concurrent-additive", domain.Additive)
+
+		const submissions = 200
+		var wg sync.WaitGroup
+		wg.Add(submissions)
+		for i := 0; i < submissions; i++ {
+			go func() {
+				defer wg.Done()
+				assert.NoError(t, svc.SubmitScore(ctx, gameID, "concurrent-additive", "user1", 1))
+			}()
+		}
+		wg.Wait()
+
+		s, err := scoreRepo.GetByLeaderboardAndUser(ctx, lb.ID, "user1", 0)
+		require.NoError(t, err)
+		assert.Equal(t, submissions, s.Score, "every +1 submission must be reflected in the total")
+	})
+
+	t.Run("concurrent record submissions from the same user converge to the max score", func(t *testing.T) {
+		svc, lbRepo, scoreRepo := newTestService()
+		lb := seedLeaderboard(ctx, lbRepo, gameID, "concurrent-record", domain.Record)
+
+		scores := make([]int, 200)
+		for i := range scores {
+			scores[i] = i + 1
+		}
+		var wg sync.WaitGroup
+		wg.Add(len(scores))
+		for _, sc := range scores {
+			sc := sc
+			go func() {
+				defer wg.Done()
+				assert.NoError(t, svc.SubmitScore(ctx, gameID, "concurrent-record", "user1", sc))
+			}()
+		}
+		wg.Wait()
+
+		s, err := scoreRepo.GetByLeaderboardAndUser(ctx, lb.ID, "user1", 0)
+		require.NoError(t, err)
+		assert.Equal(t, len(scores), s.Score, "the highest submitted score must win regardless of write order")
 	})
 }
 

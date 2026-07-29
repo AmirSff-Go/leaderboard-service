@@ -109,6 +109,31 @@ func (r *fakeAPIScoreRepo) Upsert(ctx context.Context, score *domain.Score) erro
 	return nil
 }
 
+// SubmitScoreAtomic holds the lock across the whole read-decide-write sequence, mirroring the
+// transaction+advisory-lock guarantee the Postgres implementation provides.
+func (r *fakeAPIScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+	decide func(current *domain.Score) (bool, int, error)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	key := apiScoreKey(leaderboardID, userID, durationIndex)
+	shouldSave, finalScore, err := decide(r.scores[key])
+	if err != nil {
+		return err
+	}
+	if !shouldSave {
+		return nil
+	}
+
+	r.scores[key] = &domain.Score{
+		LeaderboardID: leaderboardID,
+		UserID:        userID,
+		Score:         finalScore,
+		DurationIndex: durationIndex,
+	}
+	return nil
+}
+
 func (r *fakeAPIScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) (*domain.Score, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

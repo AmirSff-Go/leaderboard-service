@@ -20,6 +20,13 @@ type ScoreRepository interface {
 	CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int, error)
 	GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page, pageSize int) ([]*Score, error)
 	GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error)
+
+	// SubmitScoreAtomic serializes read-decide-write for a single (leaderboardID, userID, durationIndex)
+	// tuple so concurrent submissions can't race on a stale read. The repository fetches the current
+	// score, invokes decide exactly once with it, and — if decide reports shouldSave — persists
+	// finalScore, all as one atomic unit. current is nil if no score exists yet for that tuple.
+	SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+		decide func(current *Score) (shouldSave bool, finalScore int, err error)) error
 }
 
 type ScoreObject struct {
@@ -50,35 +57,19 @@ func (s *LeaderboardService) SubmitScore(ctx context.Context, gameID uuid.UUID, 
 
 	durationIndex := CurrentDurationIndex(leaderboard)
 
-	existingScore, err := s.scoreRepo.GetByLeaderboardAndUser(ctx, leaderboard.ID, userID, durationIndex)
-	if err != nil && !errors.Is(err, ErrScoreNotFound) {
-		return err
-	}
-
 	processor, err := s.processorFactory.GetProcessor(leaderboard.Type)
 	if err != nil {
 		return err
 	}
 
-	updated, finalScore, err := processor.ProcessScore(ctx, existingScore, newScore, userID)
-	if err != nil {
-		return err
-	}
-
-	if updated {
-		score := &Score{
-			LeaderboardID: leaderboard.ID,
-			UserID:        userID,
-			Score:         finalScore,
-			DurationIndex: durationIndex,
-		}
-		err := s.scoreRepo.Upsert(ctx, score)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
+	// The read (current score) and the write must happen as one atomic unit — deciding
+	// shouldSave/finalScore from a snapshot read taken outside a lock lets concurrent
+	// submissions for the same user/leaderboard/period race (e.g. two additive submissions
+	// both reading the same base and one overwrite silently dropping the other's delta).
+	return s.scoreRepo.SubmitScoreAtomic(ctx, leaderboard.ID, userID, durationIndex,
+		func(current *Score) (bool, int, error) {
+			return processor.ProcessScore(ctx, current, newScore, userID)
+		})
 }
 
 func (s *LeaderboardService) CreateLeaderboard(ctx context.Context, gameID uuid.UUID, uniqueName, description string, lbType LeaderboardType, intervalSeconds int) (*Leaderboard, error) {
