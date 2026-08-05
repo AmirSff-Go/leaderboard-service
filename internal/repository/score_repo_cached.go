@@ -105,7 +105,9 @@ func (r *CachedScoreRepo) refreshTTL(ctx context.Context, leaderboardID uuid.UUI
 	}
 	key := cache.LeaderboardKey(leaderboardID, durationIndex)
 	syncedKey := cache.LeaderboardSyncedKey(leaderboardID, durationIndex)
-	if _, err := r.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+	// TxPipelined, matching warmCache: both keys should carry the same expiry, and a plain
+	// pipeline only batches the round trip without guaranteeing the two EXPIREs land together.
+	if _, err := r.redis.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
 		pipe.Expire(ctx, key, ttl)
 		pipe.Expire(ctx, syncedKey, ttl)
 		return nil
