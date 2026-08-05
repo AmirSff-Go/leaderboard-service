@@ -159,7 +159,7 @@ type EditGameRequest struct {
 }
 
 // @Summary     Update game details
-// @Description Updates name and/or description for a game. game_name is optional; omit to keep the current value.
+// @Description Updates name and/or description for a game. game_name and game_desc are each optional; omit either to keep its current value.
 // @Tags        Admin
 // @Accept      json
 // @Produce     json
@@ -197,7 +197,9 @@ func (h *AdminHandler) EditGame(c echo.Context) error {
 	if req.GameName != "" {
 		game.Name = req.GameName
 	}
-	game.Description = req.GameDesc
+	if req.GameDesc != "" {
+		game.Description = req.GameDesc
+	}
 
 	if err := h.gameRepo.Update(context.Background(), game); err != nil {
 		return respondError(c, http.StatusInternalServerError, "failed to update game")
