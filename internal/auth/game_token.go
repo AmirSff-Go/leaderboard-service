@@ -86,27 +86,3 @@ func (tg *TokenGenerator) ParseGameToken(tokenString string) (*GameTokenClaims, 
 
 	return claims, nil
 }
-
-// ValidateToken is a generic validator that keeps backward compatibility with earlier code.
-// Prefer ParseGameToken for typed access.
-func (tg *TokenGenerator) ValidateToken(tokenString string) (map[string]interface{}, error) {
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		m, ok := token.Method.(*jwt.SigningMethodHMAC)
-		if !ok || m != jwt.SigningMethodHS256 {
-			return nil, jwt.ErrSignatureInvalid
-		}
-		return []byte(tg.secret), nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if token == nil || !token.Valid {
-		return nil, ErrInvalidToken
-	}
-
-	mc, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, ErrInvalidToken
-	}
-	return mc, nil
-}
