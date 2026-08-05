@@ -1,6 +1,8 @@
 package api
 
 import (
+	"time"
+
 	"github.com/labstack/echo/v4"
 )
 
@@ -9,12 +11,12 @@ type ErrorResponse struct {
 }
 
 type GameResponse struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Token        string `json:"token,omitempty"` // Only in register/refresh responses
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Token       string    `json:"token,omitempty"` // Only in register/refresh responses
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func respondError(c echo.Context, code int, message string) error {

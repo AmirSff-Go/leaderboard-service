@@ -84,8 +84,8 @@ func (h *AdminHandler) RegisterGame(c echo.Context) error {
 		Name:        game.Name,
 		Description: game.Description,
 		Token:       token,
-		CreatedAt:   game.CreatedAt.String(),
-		UpdatedAt:   game.UpdatedAt.String(),
+		CreatedAt:   game.CreatedAt,
+		UpdatedAt:   game.UpdatedAt,
 	})
 }
 
@@ -146,8 +146,8 @@ func (h *AdminHandler) RefreshGameToken(c echo.Context) error {
 		Name:        game.Name,
 		Description: game.Description,
 		Token:       token,
-		CreatedAt:   game.CreatedAt.String(),
-		UpdatedAt:   game.UpdatedAt.String(),
+		CreatedAt:   game.CreatedAt,
+		UpdatedAt:   game.UpdatedAt,
 	})
 }
 
@@ -209,7 +209,7 @@ func (h *AdminHandler) EditGame(c echo.Context) error {
 		ID:          game.ID.String(),
 		Name:        game.Name,
 		Description: game.Description,
-		CreatedAt:   game.CreatedAt.String(),
-		UpdatedAt:   game.UpdatedAt.String(),
+		CreatedAt:   game.CreatedAt,
+		UpdatedAt:   game.UpdatedAt,
 	})
 }
