@@ -283,6 +283,43 @@ func TestLeaderboardService_GetRankings(t *testing.T) {
 		assert.Equal(t, 20, rankings[1].Score)
 	})
 
+	t.Run("tied scores share the same rank, matching GetUserRank's semantic", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		// alice and bob tie for first; carol is strictly behind.
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "alice", 100))
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "bob", 100))
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "carol", 50))
+
+		rankings, _, _, err := svc.GetRankings(ctx, gameID, "test", 1, 20, "", 0)
+		require.NoError(t, err)
+		require.Len(t, rankings, 3)
+		assert.Equal(t, 1, rankings[0].Rank, "first tied entry is rank 1")
+		assert.Equal(t, 1, rankings[1].Rank, "second tied entry shares rank 1, not rank 2")
+		assert.Equal(t, 3, rankings[2].Rank, "next distinct entry skips to rank 3, not rank 2")
+
+		// A user's rank via the single-entry lookup must agree with their rank in the list.
+		_, _, aliceEntry, err := svc.GetRankings(ctx, gameID, "test", 1, 20, "alice", 0)
+		require.NoError(t, err)
+		assert.Equal(t, 1, aliceEntry.Rank)
+	})
+
+	t.Run("ties spanning a page boundary still get the correct global rank", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "first", 200))
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "tied-a", 100))
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "tied-b", 100))
+
+		// page_size 1: page 1 -> "first" (rank 1). page 2 -> first of the tied pair (rank 2),
+		// whichever tied user that happens to be — its rank must be 2, not a position-derived 3.
+		rankings, _, _, err := svc.GetRankings(ctx, gameID, "test", 2, 1, "", 0)
+		require.NoError(t, err)
+		require.Len(t, rankings, 1)
+		assert.Equal(t, 100, rankings[0].Score)
+		assert.Equal(t, 2, rankings[0].Rank)
+	})
+
 	t.Run("page beyond last returns empty slice", func(t *testing.T) {
 		svc, lbRepo, _ := newTestService()
 		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)

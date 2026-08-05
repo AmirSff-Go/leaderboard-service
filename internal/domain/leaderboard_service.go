@@ -101,13 +101,27 @@ func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, 
 	if err != nil {
 		return nil, 0, nil, err
 	}
+	// Rank is competition ranking (ties share a rank, e.g. 1,1,3) computed the same way as the
+	// single-user lookup below, via GetUserRank — not list position, which would silently give
+	// tied scores different ranks depending on where the page boundary falls. Consecutive rows
+	// with an identical score reuse the previous row's rank instead of re-querying.
 	rankingObjects := make([]*ScoreObject, len(rankingScores))
+	var lastScore int
+	var lastRank int
 	for i, score := range rankingScores {
+		rank := lastRank
+		if i == 0 || score.Score != lastScore {
+			rank, err = s.scoreRepo.GetUserRank(ctx, leaderboard.ID, durationIndex, score.Score)
+			if err != nil {
+				return nil, 0, nil, err
+			}
+		}
 		rankingObjects[i] = &ScoreObject{
-			Rank:   (page-1)*pageSize + i + 1,
+			Rank:   rank,
 			UserID: score.UserID,
 			Score:  score.Score,
 		}
+		lastScore, lastRank = score.Score, rank
 	}
 
 	total, err := s.scoreRepo.CountByLeaderboard(ctx, leaderboard.ID, durationIndex)
