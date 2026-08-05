@@ -45,12 +45,66 @@ func (r *fakeLeaderboardRepo) GetByGameAndName(ctx context.Context, gameID uuid.
 	return lb, nil
 }
 
+func (r *fakeLeaderboardRepo) ListByGame(ctx context.Context, gameID uuid.UUID) ([]*domain.Leaderboard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]*domain.Leaderboard, 0)
+	for _, lb := range r.leaderboards {
+		if lb.GameID == gameID {
+			result = append(result, lb)
+		}
+	}
+	return result, nil
+}
+
+// Update relocates the map entry when UniqueName changed, since fakeLeaderboardRepo is keyed by
+// gameID:uniqueName — mirroring how a real UNIQUE(game_id, unique_name) constraint would reject a
+// rename that collides with an existing leaderboard.
+func (r *fakeLeaderboardRepo) Update(ctx context.Context, lb *domain.Leaderboard) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var oldKey string
+	found := false
+	for k, existing := range r.leaderboards {
+		if existing.ID == lb.ID {
+			oldKey = k
+			found = true
+			break
+		}
+	}
+	if !found {
+		return domain.ErrLeaderboardNotFound
+	}
+	newKey := lb.GameID.String() + ":" + lb.UniqueName
+	if newKey != oldKey {
+		if _, exists := r.leaderboards[newKey]; exists {
+			return domain.ErrDuplicateLeaderboardName
+		}
+		delete(r.leaderboards, oldKey)
+	}
+	r.leaderboards[newKey] = lb
+	return nil
+}
+
+func (r *fakeLeaderboardRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for k, existing := range r.leaderboards {
+		if existing.ID == id {
+			delete(r.leaderboards, k)
+			return nil
+		}
+	}
+	return domain.ErrLeaderboardNotFound
+}
+
 // fakeScoreRepo is an in-memory domain.ScoreRepository for unit tests.
 type fakeScoreRepo struct {
-	mu               sync.Mutex
-	scores           map[string]*domain.Score
-	getUserRankCalls int
-	lastTTL          time.Duration // ttl last seen by SubmitScoreAtomic or GetRanking
+	mu                          sync.Mutex
+	scores                      map[string]*domain.Score
+	getUserRankCalls            int
+	lastTTL                     time.Duration // ttl last seen by SubmitScoreAtomic or GetRanking
+	deleteLeaderboardCacheCalls int
 }
 
 func newFakeScoreRepo() *fakeScoreRepo {
@@ -156,4 +210,22 @@ func (r *fakeScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID
 		}
 	}
 	return rank, nil
+}
+
+func (r *fakeScoreRepo) DeleteScore(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := domainScoreKey(leaderboardID, userID, durationIndex)
+	if _, ok := r.scores[key]; !ok {
+		return domain.ErrScoreNotFound
+	}
+	delete(r.scores, key)
+	return nil
+}
+
+func (r *fakeScoreRepo) DeleteLeaderboardCache(ctx context.Context, leaderboardID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.deleteLeaderboardCacheCalls++
+	return nil
 }

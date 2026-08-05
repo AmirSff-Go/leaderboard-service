@@ -110,6 +110,28 @@ func getScoreForUpdate(ctx context.Context, tx *sql.Tx, leaderboardID uuid.UUID,
 	return &score, nil
 }
 
+func (r *PostgresScoreRepo) DeleteScore(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) error {
+	result, err := r.db.ExecContext(ctx, `
+		DELETE FROM scores WHERE leaderboard_id = $1 AND user_id = $2 AND duration_index = $3
+	`, leaderboardID, userID, durationIndex)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return domain.ErrScoreNotFound
+	}
+	return nil
+}
+
+// DeleteLeaderboardCache is a no-op: Postgres has no expiring cache of its own to clear.
+func (r *PostgresScoreRepo) DeleteLeaderboardCache(ctx context.Context, leaderboardID uuid.UUID) error {
+	return nil
+}
+
 func (r *PostgresScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string,
 	durationIndex int) (*domain.Score, error) {
 	query := `

@@ -36,8 +36,13 @@ func newLeaderboardTestEnv() (*echo.Echo, *domain.Game, *fakeLBRepo, *fakeAPISco
 	}
 	g := e.Group("/leaderboards", fakeAuth)
 	g.POST("", handler.CreateLeaderboard)
+	g.GET("", handler.ListLeaderboards)
+	g.PATCH("/:name", handler.UpdateLeaderboard)
+	g.DELETE("/:name", handler.DeleteLeaderboard)
 	g.POST("/:name/scores", handler.SubmitScore)
 	g.GET("/:name/rankings", handler.GetRankings)
+	g.PATCH("/:name/scores/:user_id", handler.SetScore)
+	g.DELETE("/:name/scores/:user_id", handler.DeleteScore)
 
 	return e, game, lbRepo, scoreRepo
 }
@@ -267,5 +272,198 @@ func TestLeaderboardHandler_GetRankings(t *testing.T) {
 		e := setup(t)
 		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page=abc", "")
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+}
+
+// --- ListLeaderboards ---
+
+func TestLeaderboardHandler_ListLeaderboards(t *testing.T) {
+	t.Run("returns every leaderboard for the authenticated game", func(t *testing.T) {
+		e, _, _, _ := newLeaderboardTestEnv()
+		doRequest(e, http.MethodPost, "/leaderboards", `{"unique_name":"a","type":"record","interval_seconds":0}`)
+		doRequest(e, http.MethodPost, "/leaderboards", `{"unique_name":"b","type":"additive","interval_seconds":0}`)
+
+		rec := doRequest(e, http.MethodGet, "/leaderboards", "")
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var lbs []domain.Leaderboard
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &lbs))
+		assert.Len(t, lbs, 2)
+	})
+
+	t.Run("a different game's leaderboards are not returned", func(t *testing.T) {
+		e, _, lbRepo, _ := newLeaderboardTestEnv()
+		require.NoError(t, lbRepo.Create(context.Background(), &domain.Leaderboard{
+			ID: uuid.New(), GameID: uuid.New(), UniqueName: "other-games-board", Type: domain.Record,
+		}))
+
+		rec := doRequest(e, http.MethodGet, "/leaderboards", "")
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var lbs []domain.Leaderboard
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &lbs))
+		assert.Empty(t, lbs)
+	})
+}
+
+// --- UpdateLeaderboard ---
+
+func TestLeaderboardHandler_UpdateLeaderboard(t *testing.T) {
+	setup := func(t *testing.T) *echo.Echo {
+		t.Helper()
+		e, game, lbRepo, _ := newLeaderboardTestEnv()
+		require.NoError(t, lbRepo.Create(context.Background(), &domain.Leaderboard{
+			ID: uuid.New(), GameID: game.ID, UniqueName: "test-lb", Description: "original", Type: domain.Record,
+		}))
+		return e
+	}
+
+	t.Run("renames the leaderboard", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodPatch, "/leaderboards/test-lb", `{"unique_name":"renamed"}`)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var lb domain.Leaderboard
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &lb))
+		assert.Equal(t, "renamed", lb.UniqueName)
+		assert.Equal(t, "original", lb.Description, "description must be preserved when omitted")
+
+		// old name no longer resolves; new name does.
+		assert.Equal(t, http.StatusNotFound, doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings", "").Code)
+		assert.Equal(t, http.StatusOK, doRequest(e, http.MethodGet, "/leaderboards/renamed/rankings", "").Code)
+	})
+
+	t.Run("updates only the description when unique_name is omitted", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodPatch, "/leaderboards/test-lb", `{"description":"updated"}`)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		var lb domain.Leaderboard
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &lb))
+		assert.Equal(t, "test-lb", lb.UniqueName)
+		assert.Equal(t, "updated", lb.Description)
+	})
+
+	t.Run("leaderboard not found returns 404", func(t *testing.T) {
+		e, _, _, _ := newLeaderboardTestEnv()
+		rec := doRequest(e, http.MethodPatch, "/leaderboards/missing", `{"description":"x"}`)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("renaming to an existing name returns 409", func(t *testing.T) {
+		e, game, lbRepo, _ := newLeaderboardTestEnv()
+		require.NoError(t, lbRepo.Create(context.Background(), &domain.Leaderboard{ID: uuid.New(), GameID: game.ID, UniqueName: "taken", Type: domain.Record}))
+		require.NoError(t, lbRepo.Create(context.Background(), &domain.Leaderboard{ID: uuid.New(), GameID: game.ID, UniqueName: "movable", Type: domain.Record}))
+
+		rec := doRequest(e, http.MethodPatch, "/leaderboards/movable", `{"unique_name":"taken"}`)
+		assert.Equal(t, http.StatusConflict, rec.Code)
+	})
+}
+
+// --- DeleteLeaderboard ---
+
+func TestLeaderboardHandler_DeleteLeaderboard(t *testing.T) {
+	t.Run("deletes the leaderboard", func(t *testing.T) {
+		e, game, lbRepo, _ := newLeaderboardTestEnv()
+		require.NoError(t, lbRepo.Create(context.Background(), &domain.Leaderboard{ID: uuid.New(), GameID: game.ID, UniqueName: "test-lb", Type: domain.Record}))
+
+		rec := doRequest(e, http.MethodDelete, "/leaderboards/test-lb", "")
+		assert.Equal(t, http.StatusNoContent, rec.Code)
+
+		assert.Equal(t, http.StatusNotFound, doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings", "").Code)
+	})
+
+	t.Run("scores are gone after the leaderboard is deleted", func(t *testing.T) {
+		e, _, _, _ := newLeaderboardTestEnv()
+		doRequest(e, http.MethodPost, "/leaderboards", `{"unique_name":"test-lb","type":"record","interval_seconds":0}`)
+		doRequest(e, http.MethodPost, "/leaderboards/test-lb/scores", `{"user_id":"alice","score":100}`)
+
+		require.Equal(t, http.StatusNoContent, doRequest(e, http.MethodDelete, "/leaderboards/test-lb", "").Code)
+
+		// recreate under the same name — must not see alice's old score.
+		doRequest(e, http.MethodPost, "/leaderboards", `{"unique_name":"test-lb","type":"record","interval_seconds":0}`)
+		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings", "")
+		require.Equal(t, http.StatusOK, rec.Code)
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		assert.Equal(t, float64(0), resp["total"])
+	})
+
+	t.Run("leaderboard not found returns 404", func(t *testing.T) {
+		e, _, _, _ := newLeaderboardTestEnv()
+		rec := doRequest(e, http.MethodDelete, "/leaderboards/missing", "")
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+}
+
+// --- SetScore ---
+
+func TestLeaderboardHandler_SetScore(t *testing.T) {
+	setup := func(t *testing.T) *echo.Echo {
+		t.Helper()
+		e, _, _, _ := newLeaderboardTestEnv()
+		doRequest(e, http.MethodPost, "/leaderboards", `{"unique_name":"test-lb","type":"record","interval_seconds":0}`)
+		return e
+	}
+
+	t.Run("overwrites the score regardless of leaderboard type semantics", func(t *testing.T) {
+		e := setup(t)
+		// record type would normally reject a lower score; SetScore must not apply that logic.
+		doRequest(e, http.MethodPost, "/leaderboards/test-lb/scores", `{"user_id":"alice","score":100}`)
+		rec := doRequest(e, http.MethodPatch, "/leaderboards/test-lb/scores/alice", `{"score":42}`)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		ranking := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?user_id=alice", "")
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(ranking.Body.Bytes(), &resp))
+		userEntry := resp["user_entry"].(map[string]interface{})
+		assert.Equal(t, float64(42), userEntry["score"])
+	})
+
+	t.Run("can set a score for a user with no prior submission", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodPatch, "/leaderboards/test-lb/scores/newuser", `{"score":7}`)
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("leaderboard not found returns 404", func(t *testing.T) {
+		e, _, _, _ := newLeaderboardTestEnv()
+		rec := doRequest(e, http.MethodPatch, "/leaderboards/missing/scores/alice", `{"score":1}`)
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+}
+
+// --- DeleteScore ---
+
+func TestLeaderboardHandler_DeleteScore(t *testing.T) {
+	setup := func(t *testing.T) *echo.Echo {
+		t.Helper()
+		e, _, _, _ := newLeaderboardTestEnv()
+		doRequest(e, http.MethodPost, "/leaderboards", `{"unique_name":"test-lb","type":"record","interval_seconds":0}`)
+		doRequest(e, http.MethodPost, "/leaderboards/test-lb/scores", `{"user_id":"alice","score":100}`)
+		return e
+	}
+
+	t.Run("removes the user's score", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodDelete, "/leaderboards/test-lb/scores/alice", "")
+		assert.Equal(t, http.StatusNoContent, rec.Code)
+
+		ranking := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?user_id=alice", "")
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(ranking.Body.Bytes(), &resp))
+		assert.Nil(t, resp["user_entry"])
+	})
+
+	t.Run("deleting an already-absent score returns 404", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodDelete, "/leaderboards/test-lb/scores/ghost", "")
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+	})
+
+	t.Run("leaderboard not found returns 404", func(t *testing.T) {
+		e, _, _, _ := newLeaderboardTestEnv()
+		rec := doRequest(e, http.MethodDelete, "/leaderboards/missing/scores/alice", "")
+		assert.Equal(t, http.StatusNotFound, rec.Code)
 	})
 }

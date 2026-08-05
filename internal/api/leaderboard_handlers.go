@@ -189,3 +189,164 @@ func GetIntQueryParam(c echo.Context, name string, defaultValue int) (int, error
 	}
 	return param, nil
 }
+
+// @Summary     List leaderboards
+// @Description Lists every leaderboard belonging to the authenticated game.
+// @Tags        Leaderboards
+// @Produce     json
+// @Security    BearerAuth
+// @Success     200 {array} domain.Leaderboard
+// @Failure     401 {object} ErrorResponse "invalid or missing token"
+// @Failure     500 {object} ErrorResponse
+// @Router      /leaderboards [get]
+func (h *LeaderboardHandler) ListLeaderboards(c echo.Context) error {
+	game := GetGameFromContext(c)
+	leaderboards, err := h.leaderboardService.ListLeaderboards(c.Request().Context(), game.ID)
+	if err != nil {
+		return respondError(c, http.StatusInternalServerError, "failed to list leaderboards")
+	}
+	return respondOK(c, http.StatusOK, leaderboards)
+}
+
+type UpdateLeaderboardRequest struct {
+	UniqueName  string `json:"unique_name"`
+	Description string `json:"description"`
+}
+
+// @Summary     Rename or redescribe a leaderboard
+// @Description Updates unique_name and/or description. Both are optional; omit either to keep its current value. Type and interval_seconds cannot be changed here — create a new leaderboard instead.
+// @Tags        Leaderboards
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       name    path string                    true "Leaderboard unique name"
+// @Param       request body UpdateLeaderboardRequest true "Fields to update"
+// @Success     200 {object} domain.Leaderboard
+// @Failure     401 {object} ErrorResponse "invalid or missing token"
+// @Failure     404 {object} ErrorResponse "leaderboard not found"
+// @Failure     409 {object} ErrorResponse "unique_name already exists for this game"
+// @Failure     500 {object} ErrorResponse
+// @Router      /leaderboards/{name} [patch]
+func (h *LeaderboardHandler) UpdateLeaderboard(c echo.Context) error {
+	var req UpdateLeaderboardRequest
+	if err := c.Bind(&req); err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid request body")
+	}
+	game := GetGameFromContext(c)
+	leaderboardName := c.Param("name")
+
+	leaderboard, err := h.leaderboardService.UpdateLeaderboard(c.Request().Context(), game.ID, leaderboardName, req.UniqueName, req.Description)
+	if err != nil {
+		if errors.Is(err, domain.ErrLeaderboardNotFound) {
+			return respondError(c, http.StatusNotFound, "leaderboard not found")
+		}
+		if errors.Is(err, domain.ErrDuplicateLeaderboardName) {
+			return respondError(c, http.StatusConflict, "leaderboard name already exists for this game")
+		}
+		return respondError(c, http.StatusInternalServerError, "failed to update leaderboard")
+	}
+	return respondOK(c, http.StatusOK, leaderboard)
+}
+
+// @Summary     Delete a leaderboard
+// @Description Permanently deletes a leaderboard and all of its scores, across every period.
+// @Tags        Leaderboards
+// @Security    BearerAuth
+// @Param       name path string true "Leaderboard unique name"
+// @Success     204 "leaderboard deleted"
+// @Failure     401 {object} ErrorResponse "invalid or missing token"
+// @Failure     404 {object} ErrorResponse "leaderboard not found"
+// @Failure     500 {object} ErrorResponse
+// @Router      /leaderboards/{name} [delete]
+func (h *LeaderboardHandler) DeleteLeaderboard(c echo.Context) error {
+	game := GetGameFromContext(c)
+	leaderboardName := c.Param("name")
+
+	err := h.leaderboardService.DeleteLeaderboard(c.Request().Context(), game.ID, leaderboardName)
+	if err != nil {
+		if errors.Is(err, domain.ErrLeaderboardNotFound) {
+			return respondError(c, http.StatusNotFound, "leaderboard not found")
+		}
+		return respondError(c, http.StatusInternalServerError, "failed to delete leaderboard")
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+type SetScoreRequest struct {
+	Score int `json:"score"`
+}
+
+// @Summary     Set a user's score directly
+// @Description Overwrites a user's score for one period, bypassing the leaderboard type's normal record/additive/onetime processing. For organizer corrections, not game clients reporting attempts.
+// @Tags        Leaderboards
+// @Accept      json
+// @Produce     json
+// @Security    BearerAuth
+// @Param       name           path string          true  "Leaderboard unique name"
+// @Param       user_id        path string          true  "User ID"
+// @Param       duration_index query int             false "Time bucket to edit (-1 = current period, default)"
+// @Param       request        body SetScoreRequest true  "New score value"
+// @Success     200 "score set"
+// @Failure     400 {object} ErrorResponse "invalid request body"
+// @Failure     401 {object} ErrorResponse "invalid or missing token"
+// @Failure     404 {object} ErrorResponse "leaderboard not found"
+// @Failure     500 {object} ErrorResponse
+// @Router      /leaderboards/{name}/scores/{user_id} [patch]
+func (h *LeaderboardHandler) SetScore(c echo.Context) error {
+	var req SetScoreRequest
+	if err := c.Bind(&req); err != nil {
+		return respondError(c, http.StatusBadRequest, "invalid request body")
+	}
+	durationIndex, err := GetIntQueryParam(c, "duration_index", -1)
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "duration_index must be an integer")
+	}
+
+	game := GetGameFromContext(c)
+	leaderboardName := c.Param("name")
+	userID := c.Param("user_id")
+
+	err = h.leaderboardService.SetScore(c.Request().Context(), game.ID, leaderboardName, userID, req.Score, durationIndex)
+	if err != nil {
+		if errors.Is(err, domain.ErrLeaderboardNotFound) {
+			return respondError(c, http.StatusNotFound, "leaderboard not found")
+		}
+		return respondError(c, http.StatusInternalServerError, "failed to set score")
+	}
+	return respondOK(c, http.StatusOK, nil)
+}
+
+// @Summary     Delete a user's score
+// @Description Removes a user's score for one period. Use to correct accidental submissions or remove a participant.
+// @Tags        Leaderboards
+// @Security    BearerAuth
+// @Param       name           path string true  "Leaderboard unique name"
+// @Param       user_id        path string true  "User ID"
+// @Param       duration_index query int    false "Time bucket to delete from (-1 = current period, default)"
+// @Success     204 "score deleted"
+// @Failure     401 {object} ErrorResponse "invalid or missing token"
+// @Failure     404 {object} ErrorResponse "leaderboard or score not found"
+// @Failure     500 {object} ErrorResponse
+// @Router      /leaderboards/{name}/scores/{user_id} [delete]
+func (h *LeaderboardHandler) DeleteScore(c echo.Context) error {
+	durationIndex, err := GetIntQueryParam(c, "duration_index", -1)
+	if err != nil {
+		return respondError(c, http.StatusBadRequest, "duration_index must be an integer")
+	}
+
+	game := GetGameFromContext(c)
+	leaderboardName := c.Param("name")
+	userID := c.Param("user_id")
+
+	err = h.leaderboardService.DeleteScore(c.Request().Context(), game.ID, leaderboardName, userID, durationIndex)
+	if err != nil {
+		if errors.Is(err, domain.ErrLeaderboardNotFound) {
+			return respondError(c, http.StatusNotFound, "leaderboard not found")
+		}
+		if errors.Is(err, domain.ErrScoreNotFound) {
+			return respondError(c, http.StatusNotFound, "score not found")
+		}
+		return respondError(c, http.StatusInternalServerError, "failed to delete score")
+	}
+	return c.NoContent(http.StatusNoContent)
+}

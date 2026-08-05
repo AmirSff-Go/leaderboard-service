@@ -204,6 +204,74 @@ func TestCachedScoreRepo_TTL(t *testing.T) {
 	})
 }
 
+// TestCachedScoreRepo_DeleteScore verifies deletion removes the Postgres row (source of truth for
+// ErrScoreNotFound) and, when the cache is warm, the member from the cached sorted set too.
+func TestCachedScoreRepo_DeleteScore(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("removes from Postgres and a warm cache", func(t *testing.T) {
+		lb := seedGameAndLeaderboard(t, domain.Record, 0)
+		repo := newCachedRepo(t)
+		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "alice", 0, 0, func(current *domain.Score) (bool, int, error) {
+			return true, 100, nil
+		}))
+		_, err := repo.GetRanking(ctx, lb.ID, 0, 0, 1, 10) // warms the cache
+		require.NoError(t, err)
+
+		require.NoError(t, repo.DeleteScore(ctx, lb.ID, "alice", 0))
+
+		_, err = repo.GetByLeaderboardAndUser(ctx, lb.ID, "alice", 0)
+		assert.ErrorIs(t, err, domain.ErrScoreNotFound, "Postgres row must be gone")
+
+		key := cache.LeaderboardKey(lb.ID, 0)
+		score, err := testRedisClient.ZScore(ctx, key, "alice").Result()
+		assert.ErrorIs(t, err, redis.Nil, "cached member must be gone too")
+		assert.Zero(t, score)
+	})
+
+	t.Run("deleting an absent score returns ErrScoreNotFound and touches nothing", func(t *testing.T) {
+		lb := seedGameAndLeaderboard(t, domain.Record, 0)
+		repo := newCachedRepo(t)
+		err := repo.DeleteScore(ctx, lb.ID, "ghost", 0)
+		assert.ErrorIs(t, err, domain.ErrScoreNotFound)
+	})
+}
+
+// TestCachedScoreRepo_DeleteLeaderboardCache verifies SCAN+DEL clears every period bucket's keys
+// for a leaderboard, not just the one currently warm — a leaderboard accumulates one key pair per
+// period over its lifetime, and deletion needs to reclaim all of them, not just the latest.
+func TestCachedScoreRepo_DeleteLeaderboardCache(t *testing.T) {
+	ctx := context.Background()
+	lb := seedGameAndLeaderboard(t, domain.Record, 3600) // periodic, so distinct duration indexes are meaningful
+	repo := newCachedRepo(t)
+
+	for _, durationIndex := range []int{0, 1, 2} {
+		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "alice", durationIndex, time.Hour, func(current *domain.Score) (bool, int, error) {
+			return true, 100, nil
+		}))
+		_, err := repo.GetRanking(ctx, lb.ID, durationIndex, time.Hour, 1, 10) // warm each bucket
+		require.NoError(t, err)
+	}
+	for _, durationIndex := range []int{0, 1, 2} {
+		exists, err := testRedisClient.Exists(ctx, cache.LeaderboardKey(lb.ID, durationIndex)).Result()
+		require.NoError(t, err)
+		require.EqualValues(t, 1, exists, "precondition: bucket %d must be warm before deletion", durationIndex)
+	}
+
+	require.NoError(t, repo.DeleteLeaderboardCache(ctx, lb.ID))
+
+	for _, durationIndex := range []int{0, 1, 2} {
+		key := cache.LeaderboardKey(lb.ID, durationIndex)
+		syncedKey := cache.LeaderboardSyncedKey(lb.ID, durationIndex)
+		existsKey, err := testRedisClient.Exists(ctx, key).Result()
+		require.NoError(t, err)
+		assert.Zero(t, existsKey, "bucket %d sorted set must be gone", durationIndex)
+		existsSynced, err := testRedisClient.Exists(ctx, syncedKey).Result()
+		require.NoError(t, err)
+		assert.Zero(t, existsSynced, "bucket %d synced marker must be gone", durationIndex)
+	}
+}
+
 func assertTTLRoughly(t *testing.T, key string, want time.Duration) {
 	t.Helper()
 	ttl, err := testRedisClient.TTL(context.Background(), key).Result()
