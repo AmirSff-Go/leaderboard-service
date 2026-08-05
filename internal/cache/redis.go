@@ -16,6 +16,7 @@ func NewRedisClient(redisURL string) (*redis.Client, error) {
 	opts.PoolSize = 10    // connections per instance
 	opts.MinIdleConns = 5 // keep 5 warm at all times
 	opts.ConnMaxLifetime = 5 * time.Minute
+	opts.ConnMaxIdleTime = 2 * time.Minute // matches the Postgres pool's idle timeout
 	return redis.NewClient(opts), nil
 }
 
