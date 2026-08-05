@@ -187,6 +187,44 @@ func (r *PostgresScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.U
 	return scores, nil
 }
 
+// ListAllByLeaderboard returns every score for a (leaderboard, duration_index) bucket, ordered by
+// score descending, with no pagination. Used to fully hydrate the Redis cache so a partial page
+// fetch can never be mistaken for the complete leaderboard.
+func (r *PostgresScoreRepo) ListAllByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) ([]*domain.Score, error) {
+	query := `
+                SELECT id, leaderboard_id, user_id, score, duration_index, created_at, updated_at
+                FROM scores
+                WHERE leaderboard_id = $1 AND duration_index = $2
+                ORDER BY score DESC
+        `
+	rows, err := r.db.QueryContext(ctx, query, leaderboardID, durationIndex)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	scores := make([]*domain.Score, 0)
+	for rows.Next() {
+		var score domain.Score
+		if err := rows.Scan(
+			&score.ID,
+			&score.LeaderboardID,
+			&score.UserID,
+			&score.Score,
+			&score.DurationIndex,
+			&score.CreatedAt,
+			&score.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		scores = append(scores, &score)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return scores, nil
+}
+
 func (r *PostgresScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int,
 	error) {
 	query := `
