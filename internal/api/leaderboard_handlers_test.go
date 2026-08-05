@@ -222,4 +222,34 @@ func TestLeaderboardHandler_GetRankings(t *testing.T) {
 		assert.Equal(t, float64(1), resp["page"])
 		assert.Equal(t, float64(20), resp["page_size"])
 	})
+
+	t.Run("zero page returns 400", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page=0", "")
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("negative page returns 400", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page=-1", "")
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("zero page_size returns 400", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page_size=0", "")
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("negative page_size returns 400", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page_size=-5", "")
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
+	t.Run("non-numeric page returns 400", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page=abc", "")
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
 }
