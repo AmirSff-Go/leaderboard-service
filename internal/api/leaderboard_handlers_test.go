@@ -251,6 +251,18 @@ func TestLeaderboardHandler_GetRankings(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
+	t.Run("page_size of exactly 100 is accepted", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page_size=100", "")
+		assert.Equal(t, http.StatusOK, rec.Code)
+	})
+
+	t.Run("page_size over 100 returns 400", func(t *testing.T) {
+		e := setup(t)
+		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page_size=101", "")
+		assert.Equal(t, http.StatusBadRequest, rec.Code)
+	})
+
 	t.Run("non-numeric page returns 400", func(t *testing.T) {
 		e := setup(t)
 		rec := doRequest(e, http.MethodGet, "/leaderboards/test-lb/rankings?page=abc", "")

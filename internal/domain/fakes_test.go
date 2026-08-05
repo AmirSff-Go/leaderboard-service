@@ -46,8 +46,9 @@ func (r *fakeLeaderboardRepo) GetByGameAndName(ctx context.Context, gameID uuid.
 
 // fakeScoreRepo is an in-memory domain.ScoreRepository for unit tests.
 type fakeScoreRepo struct {
-	mu     sync.Mutex
-	scores map[string]*domain.Score
+	mu            sync.Mutex
+	scores        map[string]*domain.Score
+	getUserRankCalls int
 }
 
 func newFakeScoreRepo() *fakeScoreRepo {
@@ -121,7 +122,14 @@ func (r *fakeScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID,
 			bucket = append(bucket, s)
 		}
 	}
-	sort.Slice(bucket, func(i, j int) bool { return bucket[i].Score > bucket[j].Score })
+	// Tiebreak on UserID ascending, matching the Postgres repo's ORDER BY score DESC, user_id ASC —
+	// pagination across ties needs a deterministic secondary order, not just a higher score first.
+	sort.Slice(bucket, func(i, j int) bool {
+		if bucket[i].Score != bucket[j].Score {
+			return bucket[i].Score > bucket[j].Score
+		}
+		return bucket[i].UserID < bucket[j].UserID
+	})
 	start := (page - 1) * pageSize
 	if start >= len(bucket) {
 		return []*domain.Score{}, nil
@@ -136,6 +144,7 @@ func (r *fakeScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID,
 func (r *fakeScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.getUserRankCalls++
 	rank := 1
 	for _, s := range r.scores {
 		if s.LeaderboardID == leaderboardID && s.DurationIndex == durationIndex && s.Score > score {

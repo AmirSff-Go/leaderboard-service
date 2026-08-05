@@ -111,6 +111,12 @@ func (h *LeaderboardHandler) SubmitScore(c echo.Context) error {
 	return respondOK(c, http.StatusCreated, nil)
 }
 
+// maxPageSize bounds how many rows a single rankings request can request. Beyond keeping
+// responses reasonably sized, GetRankings issues one rank lookup per distinct score in the
+// page, so an unbounded page_size turns one HTTP request into an unbounded number of
+// sequential repository calls.
+const maxPageSize = 100
+
 type GetRankingsResponseBody struct {
 	Rankings  []*domain.ScoreObject `json:"rankings"`
 	Total     int                   `json:"total"`
@@ -126,11 +132,11 @@ type GetRankingsResponseBody struct {
 // @Security    BearerAuth
 // @Param       name           path  string true  "Leaderboard unique name"
 // @Param       page           query int    false "Page number, 1-based (default: 1)"
-// @Param       page_size      query int    false "Results per page, must be 1 or greater (default: 20)"
+// @Param       page_size      query int    false "Results per page, 1-100 (default: 20)"
 // @Param       user_id        query string false "Include this user's rank and score in user_entry"
 // @Param       duration_index query int    false "Time bucket (-1 = current period, 0+ = historical)"
 // @Success     200 {object} GetRankingsResponseBody
-// @Failure     400 {object} ErrorResponse "page or page_size less than 1"
+// @Failure     400 {object} ErrorResponse "page less than 1, or page_size outside 1-100"
 // @Failure     401 {object} ErrorResponse "invalid or missing token"
 // @Failure     404 {object} ErrorResponse "leaderboard not found"
 // @Failure     500 {object} ErrorResponse
@@ -147,6 +153,9 @@ func (h *LeaderboardHandler) GetRankings(c echo.Context) error {
 	}
 	if pageSize < 1 {
 		return respondError(c, http.StatusBadRequest, "page_size must be 1 or greater")
+	}
+	if pageSize > maxPageSize {
+		return respondError(c, http.StatusBadRequest, fmt.Sprintf("page_size must be %d or less", maxPageSize))
 	}
 
 	game := GetGameFromContext(c)

@@ -304,6 +304,39 @@ func TestLeaderboardService_GetRankings(t *testing.T) {
 		assert.Equal(t, 1, aliceEntry.Rank)
 	})
 
+	t.Run("consecutive ties reuse the previous rank instead of re-querying", func(t *testing.T) {
+		svc, lbRepo, scoreRepo := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "a", 100))
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "b", 100))
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "c", 100))
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "d", 50))
+
+		scoreRepo.getUserRankCalls = 0
+		rankings, _, _, err := svc.GetRankings(ctx, gameID, "test", 1, 20, "", 0)
+		require.NoError(t, err)
+		require.Len(t, rankings, 4)
+		// 2 distinct scores (100 and 50) -> 2 GetUserRank calls, not 4.
+		assert.Equal(t, 2, scoreRepo.getUserRankCalls)
+	})
+
+	t.Run("a tie group larger than page_size gets a consistent rank across every page", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		// five-way tie for first place, all sharing rank 1.
+		for _, u := range []string{"p1", "p2", "p3", "p4", "p5"} {
+			require.NoError(t, svc.SubmitScore(ctx, gameID, "test", u, 100))
+		}
+
+		for page := 1; page <= 5; page++ {
+			rankings, total, _, err := svc.GetRankings(ctx, gameID, "test", page, 1, "", 0)
+			require.NoError(t, err)
+			assert.Equal(t, 5, total)
+			require.Len(t, rankings, 1)
+			assert.Equal(t, 1, rankings[0].Rank, "page %d: every member of the tie group is rank 1", page)
+		}
+	})
+
 	t.Run("ties spanning a page boundary still get the correct global rank", func(t *testing.T) {
 		svc, lbRepo, _ := newTestService()
 		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
