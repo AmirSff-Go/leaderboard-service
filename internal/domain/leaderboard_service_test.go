@@ -399,3 +399,175 @@ func TestLeaderboardService_GetRankings(t *testing.T) {
 		assert.Empty(t, rankings)
 	})
 }
+
+// --- ListLeaderboards / UpdateLeaderboard / DeleteLeaderboard ---
+
+func TestLeaderboardService_ListLeaderboards(t *testing.T) {
+	ctx := context.Background()
+	gameID := uuid.New()
+
+	t.Run("returns only the requesting game's leaderboards", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "mine", domain.Record)
+		seedLeaderboard(ctx, lbRepo, uuid.New(), "someone-elses", domain.Record)
+
+		lbs, err := svc.ListLeaderboards(ctx, gameID)
+		require.NoError(t, err)
+		require.Len(t, lbs, 1)
+		assert.Equal(t, "mine", lbs[0].UniqueName)
+	})
+
+	t.Run("a game with no leaderboards gets an empty slice, not an error", func(t *testing.T) {
+		svc, _, _ := newTestService()
+		lbs, err := svc.ListLeaderboards(ctx, gameID)
+		require.NoError(t, err)
+		assert.Empty(t, lbs)
+	})
+}
+
+func TestLeaderboardService_UpdateLeaderboard(t *testing.T) {
+	ctx := context.Background()
+	gameID := uuid.New()
+
+	t.Run("renames and updates description together", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "old-name", domain.Record)
+
+		lb, err := svc.UpdateLeaderboard(ctx, gameID, "old-name", "new-name", "new description")
+		require.NoError(t, err)
+		assert.Equal(t, "new-name", lb.UniqueName)
+		assert.Equal(t, "new description", lb.Description)
+
+		_, _, _, err = svc.GetRankings(ctx, gameID, "old-name", 1, 20, "", 0)
+		assert.Equal(t, domain.ErrLeaderboardNotFound, err, "old name must no longer resolve")
+		_, _, _, err = svc.GetRankings(ctx, gameID, "new-name", 1, 20, "", 0)
+		require.NoError(t, err)
+	})
+
+	t.Run("omitted fields keep their current value", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		lb := seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		lb.Description = "original"
+		require.NoError(t, lbRepo.Update(ctx, lb))
+
+		updated, err := svc.UpdateLeaderboard(ctx, gameID, "test", "", "")
+		require.NoError(t, err)
+		assert.Equal(t, "test", updated.UniqueName)
+		assert.Equal(t, "original", updated.Description)
+	})
+
+	t.Run("leaderboard not found returns ErrLeaderboardNotFound", func(t *testing.T) {
+		svc, _, _ := newTestService()
+		_, err := svc.UpdateLeaderboard(ctx, gameID, "missing", "x", "")
+		assert.Equal(t, domain.ErrLeaderboardNotFound, err)
+	})
+
+	t.Run("renaming to a name already used by this game returns ErrDuplicateLeaderboardName", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "taken", domain.Record)
+		seedLeaderboard(ctx, lbRepo, gameID, "movable", domain.Record)
+
+		_, err := svc.UpdateLeaderboard(ctx, gameID, "movable", "taken", "")
+		assert.Equal(t, domain.ErrDuplicateLeaderboardName, err)
+	})
+
+	t.Run("type and interval_seconds are not exposed for editing", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		lb := seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record) // IntervalSeconds: 0
+		updated, err := svc.UpdateLeaderboard(ctx, gameID, "test", "renamed", "")
+		require.NoError(t, err)
+		assert.Equal(t, domain.Record, updated.Type)
+		assert.Equal(t, lb.IntervalSeconds, updated.IntervalSeconds)
+	})
+}
+
+func TestLeaderboardService_DeleteLeaderboard(t *testing.T) {
+	ctx := context.Background()
+	gameID := uuid.New()
+
+	t.Run("deletes the leaderboard and its cache", func(t *testing.T) {
+		svc, lbRepo, scoreRepo := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "alice", 100))
+
+		require.NoError(t, svc.DeleteLeaderboard(ctx, gameID, "test"))
+
+		_, _, _, err := svc.GetRankings(ctx, gameID, "test", 1, 20, "", 0)
+		assert.Equal(t, domain.ErrLeaderboardNotFound, err)
+		assert.Equal(t, 1, scoreRepo.deleteLeaderboardCacheCalls, "cache invalidation must run for the deleted leaderboard")
+	})
+
+	t.Run("leaderboard not found returns ErrLeaderboardNotFound", func(t *testing.T) {
+		svc, _, _ := newTestService()
+		err := svc.DeleteLeaderboard(ctx, gameID, "missing")
+		assert.Equal(t, domain.ErrLeaderboardNotFound, err)
+	})
+
+	t.Run("recreating under the same name after delete starts with no scores", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "alice", 100))
+		require.NoError(t, svc.DeleteLeaderboard(ctx, gameID, "test"))
+
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		_, total, _, err := svc.GetRankings(ctx, gameID, "test", 1, 20, "", 0)
+		require.NoError(t, err)
+		assert.Equal(t, 0, total)
+	})
+}
+
+// --- SetScore / DeleteScore ---
+
+func TestLeaderboardService_SetScore(t *testing.T) {
+	ctx := context.Background()
+	gameID := uuid.New()
+
+	t.Run("overwrites the score regardless of leaderboard type semantics", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "alice", 100))
+
+		// record type would reject a lower score via SubmitScore; SetScore must not apply that.
+		require.NoError(t, svc.SetScore(ctx, gameID, "test", "alice", 42, -1))
+
+		_, _, userEntry, err := svc.GetRankings(ctx, gameID, "test", 1, 20, "alice", 0)
+		require.NoError(t, err)
+		assert.Equal(t, 42, userEntry.Score)
+	})
+
+	t.Run("leaderboard not found returns ErrLeaderboardNotFound", func(t *testing.T) {
+		svc, _, _ := newTestService()
+		err := svc.SetScore(ctx, gameID, "missing", "alice", 1, -1)
+		assert.Equal(t, domain.ErrLeaderboardNotFound, err)
+	})
+}
+
+func TestLeaderboardService_DeleteScore(t *testing.T) {
+	ctx := context.Background()
+	gameID := uuid.New()
+
+	t.Run("removes the user's score", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "test", "alice", 100))
+
+		require.NoError(t, svc.DeleteScore(ctx, gameID, "test", "alice", -1))
+
+		_, _, userEntry, err := svc.GetRankings(ctx, gameID, "test", 1, 20, "alice", 0)
+		require.NoError(t, err)
+		assert.Nil(t, userEntry)
+	})
+
+	t.Run("deleting an absent score returns ErrScoreNotFound", func(t *testing.T) {
+		svc, lbRepo, _ := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "test", domain.Record)
+		err := svc.DeleteScore(ctx, gameID, "test", "ghost", -1)
+		assert.Equal(t, domain.ErrScoreNotFound, err)
+	})
+
+	t.Run("leaderboard not found returns ErrLeaderboardNotFound", func(t *testing.T) {
+		svc, _, _ := newTestService()
+		err := svc.DeleteScore(ctx, gameID, "missing", "alice", -1)
+		assert.Equal(t, domain.ErrLeaderboardNotFound, err)
+	})
+}

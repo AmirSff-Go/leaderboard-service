@@ -60,9 +60,14 @@ func NewServer(
 	leaderboardService := domain.NewLeaderboardService(leaderboardRepo, scoreRepo, processorFactory)
 	leaderboardHandler := NewLeaderboardHandler(leaderboardService)
 	gameGroup.POST("", leaderboardHandler.CreateLeaderboard)
+	gameGroup.GET("", leaderboardHandler.ListLeaderboards)
+	gameGroup.PATCH("/:name", leaderboardHandler.UpdateLeaderboard)
+	gameGroup.DELETE("/:name", leaderboardHandler.DeleteLeaderboard)
 
 	gameGroup.POST("/:name/scores", leaderboardHandler.SubmitScore)
 	gameGroup.GET("/:name/rankings", leaderboardHandler.GetRankings)
+	gameGroup.PATCH("/:name/scores/:user_id", leaderboardHandler.SetScore)
+	gameGroup.DELETE("/:name/scores/:user_id", leaderboardHandler.DeleteScore)
 
 	return e
 }

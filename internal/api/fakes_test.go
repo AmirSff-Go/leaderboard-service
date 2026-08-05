@@ -88,6 +88,56 @@ func (r *fakeLBRepo) GetByGameAndName(ctx context.Context, gameID uuid.UUID, uni
 	return lb, nil
 }
 
+func (r *fakeLBRepo) ListByGame(ctx context.Context, gameID uuid.UUID) ([]*domain.Leaderboard, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]*domain.Leaderboard, 0)
+	for _, lb := range r.leaderboards {
+		if lb.GameID == gameID {
+			result = append(result, lb)
+		}
+	}
+	return result, nil
+}
+
+func (r *fakeLBRepo) Update(ctx context.Context, lb *domain.Leaderboard) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var oldKey string
+	found := false
+	for k, existing := range r.leaderboards {
+		if existing.ID == lb.ID {
+			oldKey = k
+			found = true
+			break
+		}
+	}
+	if !found {
+		return domain.ErrLeaderboardNotFound
+	}
+	newKey := lb.GameID.String() + ":" + lb.UniqueName
+	if newKey != oldKey {
+		if _, exists := r.leaderboards[newKey]; exists {
+			return domain.ErrDuplicateLeaderboardName
+		}
+		delete(r.leaderboards, oldKey)
+	}
+	r.leaderboards[newKey] = lb
+	return nil
+}
+
+func (r *fakeLBRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for k, existing := range r.leaderboards {
+		if existing.ID == id {
+			delete(r.leaderboards, k)
+			return nil
+		}
+	}
+	return domain.ErrLeaderboardNotFound
+}
+
 // --- fakeAPIScoreRepo (domain.ScoreRepository) ---
 
 type fakeAPIScoreRepo struct {
@@ -188,4 +238,19 @@ func (r *fakeAPIScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.U
 		}
 	}
 	return rank, nil
+}
+
+func (r *fakeAPIScoreRepo) DeleteScore(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := apiScoreKey(leaderboardID, userID, durationIndex)
+	if _, ok := r.scores[key]; !ok {
+		return domain.ErrScoreNotFound
+	}
+	delete(r.scores, key)
+	return nil
+}
+
+func (r *fakeAPIScoreRepo) DeleteLeaderboardCache(ctx context.Context, leaderboardID uuid.UUID) error {
+	return nil
 }

@@ -31,3 +31,10 @@ func LeaderboardKey(leaderboardID uuid.UUID, durationIndex int) string {
 func LeaderboardSyncedKey(leaderboardID uuid.UUID, durationIndex int) string {
 	return fmt.Sprintf("lb:%s:%d:synced", leaderboardID.String(), durationIndex)
 }
+
+// LeaderboardKeyPattern matches every key belonging to a leaderboard across all of its period
+// buckets — both LeaderboardKey and LeaderboardSyncedKey forms, since ":synced" is a suffix on
+// top of the same "lb:{id}:{n}" prefix. For SCAN MATCH, not direct GET/SET.
+func LeaderboardKeyPattern(leaderboardID uuid.UUID) string {
+	return fmt.Sprintf("lb:%s:*", leaderboardID.String())
+}

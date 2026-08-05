@@ -27,4 +27,10 @@ type ScoreRepo interface {
 	// for that same tuple. current is nil when no score exists yet.
 	SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int, ttl time.Duration,
 		decide func(current *domain.Score) (shouldSave bool, finalScore int, err error)) error
+
+	DeleteScore(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) error
+
+	// DeleteLeaderboardCache clears every cache entry belonging to a leaderboard, across all of
+	// its period buckets. A non-caching implementation is a no-op.
+	DeleteLeaderboardCache(ctx context.Context, leaderboardID uuid.UUID) error
 }

@@ -13,6 +13,9 @@ var ErrScoreNotFound = errors.New("score not found")
 type LeaderboardRepository interface {
 	GetByGameAndName(ctx context.Context, gameID uuid.UUID, uniqueName string) (*Leaderboard, error)
 	Create(ctx context.Context, leaderboard *Leaderboard) error
+	ListByGame(ctx context.Context, gameID uuid.UUID) ([]*Leaderboard, error)
+	Update(ctx context.Context, leaderboard *Leaderboard) error
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
 // ttl is how long a repository implementation that caches by (leaderboardID, durationIndex)
@@ -32,6 +35,16 @@ type ScoreRepository interface {
 	// finalScore, all as one atomic unit. current is nil if no score exists yet for that tuple.
 	SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int, ttl time.Duration,
 		decide func(current *Score) (shouldSave bool, finalScore int, err error)) error
+
+	// DeleteScore removes a single user's score for one period bucket.
+	DeleteScore(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) error
+
+	// DeleteLeaderboardCache clears every cache entry for a leaderboard across all of its period
+	// buckets. Deleting the leaderboard row itself is a LeaderboardRepository concern (Postgres
+	// cascades its scores automatically); the cache has no such relationship and must be cleared
+	// explicitly, or an all-time leaderboard's single permanent bucket (BucketCacheTTL never
+	// expires it) would leak in Redis forever after the leaderboard it belongs to is gone.
+	DeleteLeaderboardCache(ctx context.Context, leaderboardID uuid.UUID) error
 }
 
 type ScoreObject struct {
@@ -93,15 +106,52 @@ func (s *LeaderboardService) CreateLeaderboard(ctx context.Context, gameID uuid.
 	return leaderboard, nil
 }
 
+func (s *LeaderboardService) ListLeaderboards(ctx context.Context, gameID uuid.UUID) ([]*Leaderboard, error) {
+	return s.leaderboardRepo.ListByGame(ctx, gameID)
+}
+
+// UpdateLeaderboard renames and/or redescribes a leaderboard. uniqueName/newDescription empty
+// means "leave unchanged" (matches EditGame's convention elsewhere in this API). Type and
+// IntervalSeconds are deliberately not editable here: changing either would silently reinterpret
+// every score already recorded under the old semantics (e.g. existing period buckets would no
+// longer line up with a new interval). Create a new leaderboard instead.
+func (s *LeaderboardService) UpdateLeaderboard(ctx context.Context, gameID uuid.UUID, uniqueName, newUniqueName, newDescription string) (*Leaderboard, error) {
+	leaderboard, err := s.leaderboardRepo.GetByGameAndName(ctx, gameID, uniqueName)
+	if err != nil {
+		return nil, err
+	}
+	if newUniqueName != "" {
+		leaderboard.UniqueName = newUniqueName
+	}
+	if newDescription != "" {
+		leaderboard.Description = newDescription
+	}
+	if err := s.leaderboardRepo.Update(ctx, leaderboard); err != nil {
+		return nil, err
+	}
+	return leaderboard, nil
+}
+
+func (s *LeaderboardService) DeleteLeaderboard(ctx context.Context, gameID uuid.UUID, uniqueName string) error {
+	leaderboard, err := s.leaderboardRepo.GetByGameAndName(ctx, gameID, uniqueName)
+	if err != nil {
+		return err
+	}
+	if err := s.leaderboardRepo.Delete(ctx, leaderboard.ID); err != nil {
+		return err
+	}
+	// Best-effort: DeleteLeaderboardCache never returns an error for cache-layer failures (see
+	// its doc comment), so this can't leave the leaderboard "half deleted" from the caller's view.
+	return s.scoreRepo.DeleteLeaderboardCache(ctx, leaderboard.ID)
+}
+
 func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, leaderboardName string, page, pageSize int, userID string, durationIndex int) ([]*ScoreObject, int, *ScoreObject, error) {
 	leaderboard, err := s.leaderboardRepo.GetByGameAndName(ctx, gameID, leaderboardName)
 	if err != nil {
 		return nil, 0, nil, err
 	}
 
-	if durationIndex == -1 {
-		durationIndex = CurrentDurationIndex(leaderboard)
-	}
+	durationIndex = resolveDurationIndex(leaderboard, durationIndex)
 	ttl := BucketCacheTTL(leaderboard.IntervalSeconds, durationIndex, time.Now())
 
 	rankingScores, err := s.scoreRepo.GetRanking(ctx, leaderboard.ID, durationIndex, ttl, page, pageSize)
@@ -159,4 +209,41 @@ func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, 
 		}
 	}
 	return rankingObjects, total, userEntry, nil
+}
+
+// resolveDurationIndex applies GetRankings' existing convention (-1 means "the current period")
+// to the score-mutation endpoints too, so all four leaderboard-scoped APIs agree on what
+// duration_index means.
+func resolveDurationIndex(leaderboard *Leaderboard, durationIndex int) int {
+	if durationIndex == -1 {
+		return CurrentDurationIndex(leaderboard)
+	}
+	return durationIndex
+}
+
+// SetScore directly overwrites a user's score for one period bucket, bypassing the leaderboard
+// type's normal processing (record/additive/onetime). It exists for organizer corrections — "I
+// mistyped this score" — where the caller wants their exact value to win regardless of what's
+// already there, unlike SubmitScore which is a game client honestly reporting a new attempt.
+func (s *LeaderboardService) SetScore(ctx context.Context, gameID uuid.UUID, leaderboardName, userID string, newScore, durationIndex int) error {
+	leaderboard, err := s.leaderboardRepo.GetByGameAndName(ctx, gameID, leaderboardName)
+	if err != nil {
+		return err
+	}
+	durationIndex = resolveDurationIndex(leaderboard, durationIndex)
+	ttl := BucketCacheTTL(leaderboard.IntervalSeconds, durationIndex, time.Now())
+
+	return s.scoreRepo.SubmitScoreAtomic(ctx, leaderboard.ID, userID, durationIndex, ttl,
+		func(current *Score) (bool, int, error) {
+			return true, newScore, nil
+		})
+}
+
+func (s *LeaderboardService) DeleteScore(ctx context.Context, gameID uuid.UUID, leaderboardName, userID string, durationIndex int) error {
+	leaderboard, err := s.leaderboardRepo.GetByGameAndName(ctx, gameID, leaderboardName)
+	if err != nil {
+		return err
+	}
+	durationIndex = resolveDurationIndex(leaderboard, durationIndex)
+	return s.scoreRepo.DeleteScore(ctx, leaderboard.ID, userID, durationIndex)
 }

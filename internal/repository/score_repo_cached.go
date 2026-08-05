@@ -268,3 +268,44 @@ func (r *CachedScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID 
 	}
 	return int(count), nil
 }
+
+// DeleteScore removes the row from Postgres (source of truth, and where ErrScoreNotFound comes
+// from), then removes the member from the cached sorted set if warm. ZRem on a cold or
+// already-absent set is a harmless no-op, so this doesn't need an isWarm check first.
+func (r *CachedScoreRepo) DeleteScore(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) error {
+	if err := r.postgres.DeleteScore(ctx, leaderboardID, userID, durationIndex); err != nil {
+		return err
+	}
+	key := cache.LeaderboardKey(leaderboardID, durationIndex)
+	if err := r.redis.ZRem(ctx, key, userID).Err(); err != nil {
+		slog.Error("Failed to remove score from Redis cache", "error", err)
+	}
+	return nil
+}
+
+// DeleteLeaderboardCache clears every Redis key for a leaderboard across all of its period
+// buckets, via SCAN (not KEYS, which blocks the server while it walks the whole keyspace).
+// Cache-layer failures are logged and swallowed, not returned: the leaderboard row itself is
+// already gone from Postgres by the time this runs (see LeaderboardService.DeleteLeaderboard),
+// so there's nothing left to roll back — a failure here just means a slower memory reclaim,
+// not an inconsistent leaderboard.
+func (r *CachedScoreRepo) DeleteLeaderboardCache(ctx context.Context, leaderboardID uuid.UUID) error {
+	pattern := cache.LeaderboardKeyPattern(leaderboardID)
+	var cursor uint64
+	for {
+		keys, next, err := r.redis.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			slog.Error("Failed to scan Redis cache for leaderboard deletion", "error", err)
+			return nil
+		}
+		if len(keys) > 0 {
+			if err := r.redis.Del(ctx, keys...).Err(); err != nil {
+				slog.Error("Failed to delete Redis cache keys for leaderboard", "error", err)
+			}
+		}
+		cursor = next
+		if cursor == 0 {
+			return nil
+		}
+	}
+}

@@ -17,3 +17,14 @@ Baseline. Everything merged before this changelog existed: multiple leaderboard 
 
 ### Fixed
 - Redis keys for period buckets (`lb:{id}:{n}` and its `:synced` marker) now get a TTL instead of living forever. Every `(leaderboard, period)` pair used to create two permanent Redis keys — for a leaderboard with tens of thousands of boards and daily/weekly periods, that's unbounded memory growth, since Postgres (the source of truth) is never re-consulted to clean anything up. The TTL is set to the period's end time plus a 24h grace window, computed and refreshed on every write, so an active period's bucket effectively never expires while it's still current, and a bucket nobody touches again after its period ends is reclaimed automatically without needing a background sweep. All-time leaderboards (`interval_seconds: 0`) are unaffected — their single bucket is permanently current and is never expired. No HTTP-facing behavior changes; this is purely a cache memory fix.
+
+## [1.1.0] - 2026-08-06
+
+### Added
+- `GET /leaderboards` — lists every leaderboard belonging to the authenticated game.
+- `PATCH /leaderboards/{name}` — renames and/or redescribes a leaderboard. `unique_name`/`description` are each optional; omit either to keep its current value. Type and `interval_seconds` are not editable here (changing either would reinterpret every score already recorded under the old semantics) — create a new leaderboard instead. Returns `409` if the new name is already taken by another leaderboard in the same game.
+- `DELETE /leaderboards/{name}` — permanently deletes a leaderboard and all of its scores across every period. Postgres deletion cascades via foreign key; the Redis cache for every period bucket the leaderboard ever had is explicitly cleared via `SCAN`, since Redis has no equivalent cascade.
+- `PATCH /leaderboards/{name}/scores/{user_id}` — directly overwrites a user's score for one period, bypassing the leaderboard type's normal record/additive/onetime processing. For organizer corrections ("I mistyped this score"), not game clients reporting an honest attempt. Accepts `duration_index` as an optional query param (defaults to the current period, matching `GET .../rankings`'s convention).
+- `DELETE /leaderboards/{name}/scores/{user_id}` — removes a user's score for one period (default: current). Returns `404` if no score exists there. Use to correct accidental submissions or remove a participant.
+
+These close the gap called out in the design review: organizers could create leaderboards and submit scores, but had no way to fix a typo, rename a board, remove a participant, or delete a leaderboard entirely without an endpoint. All four are B2C-blocking without this.
