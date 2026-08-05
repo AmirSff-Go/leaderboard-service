@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
 	"github.com/google/uuid"
@@ -18,7 +19,8 @@ func NewPostgresScoreRepo(db *sql.DB) *PostgresScoreRepo {
 	return &PostgresScoreRepo{db: db}
 }
 
-func (r *PostgresScoreRepo) Upsert(ctx context.Context, score *domain.Score) error {
+// ttl is unused: Postgres is the source of truth and has no expiring cache layer of its own.
+func (r *PostgresScoreRepo) Upsert(ctx context.Context, score *domain.Score, _ time.Duration) error {
 	query := `
                 INSERT INTO scores (id, leaderboard_id, user_id, score, duration_index, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
@@ -42,7 +44,8 @@ func (r *PostgresScoreRepo) Upsert(ctx context.Context, score *domain.Score) err
 // tuple using a transaction-scoped Postgres advisory lock. Concurrent submissions for the same
 // tuple block on the lock instead of racing on a stale read; submissions for different tuples
 // (different users, leaderboards, or periods) are unaffected and proceed in parallel.
-func (r *PostgresScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+// ttl is unused; see Upsert.
+func (r *PostgresScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int, _ time.Duration,
 	decide func(current *domain.Score) (bool, int, error)) error {
 
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -134,7 +137,8 @@ func (r *PostgresScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderb
 	return &score, nil
 }
 
-func (r *PostgresScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error) {
+// ttl is unused; see Upsert.
+func (r *PostgresScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, _ time.Duration, score int) (int, error) {
 
 	rankQuery := `
 				SELECT COUNT(*) + 1 AS rank
@@ -149,7 +153,8 @@ func (r *PostgresScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.
 	return rank, nil
 }
 
-func (r *PostgresScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page,
+// ttl is unused; see Upsert.
+func (r *PostgresScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, _ time.Duration, page,
 	pageSize int) ([]*domain.Score, error) {
 	offset := (page - 1) * pageSize
 	// ORDER BY score DESC alone has no defined order among ties, so two separate paginated
@@ -230,7 +235,8 @@ func (r *PostgresScoreRepo) ListAllByLeaderboard(ctx context.Context, leaderboar
 	return scores, nil
 }
 
-func (r *PostgresScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int,
+// ttl is unused; see Upsert.
+func (r *PostgresScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, _ time.Duration) (int,
 	error) {
 	query := `
                 SELECT COUNT(*)

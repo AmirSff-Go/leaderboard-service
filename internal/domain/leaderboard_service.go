@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -14,18 +15,22 @@ type LeaderboardRepository interface {
 	Create(ctx context.Context, leaderboard *Leaderboard) error
 }
 
+// ttl is how long a repository implementation that caches by (leaderboardID, durationIndex)
+// should keep that bucket cached, per BucketCacheTTL — 0 means never expire. Callers always pass
+// the value BucketCacheTTL computed for the bucket being touched; a non-caching implementation
+// (e.g. pure Postgres) is free to ignore it.
 type ScoreRepository interface {
-	Upsert(ctx context.Context, score *Score) error
+	Upsert(ctx context.Context, score *Score, ttl time.Duration) error
 	GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int) (*Score, error)
-	CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int, error)
-	GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page, pageSize int) ([]*Score, error)
-	GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error)
+	CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration) (int, error)
+	GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration, page, pageSize int) ([]*Score, error)
+	GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration, score int) (int, error)
 
 	// SubmitScoreAtomic serializes read-decide-write for a single (leaderboardID, userID, durationIndex)
 	// tuple so concurrent submissions can't race on a stale read. The repository fetches the current
 	// score, invokes decide exactly once with it, and — if decide reports shouldSave — persists
 	// finalScore, all as one atomic unit. current is nil if no score exists yet for that tuple.
-	SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+	SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int, ttl time.Duration,
 		decide func(current *Score) (shouldSave bool, finalScore int, err error)) error
 }
 
@@ -56,6 +61,7 @@ func (s *LeaderboardService) SubmitScore(ctx context.Context, gameID uuid.UUID, 
 	}
 
 	durationIndex := CurrentDurationIndex(leaderboard)
+	ttl := BucketCacheTTL(leaderboard.IntervalSeconds, durationIndex, time.Now())
 
 	processor, err := s.processorFactory.GetProcessor(leaderboard.Type)
 	if err != nil {
@@ -66,7 +72,7 @@ func (s *LeaderboardService) SubmitScore(ctx context.Context, gameID uuid.UUID, 
 	// shouldSave/finalScore from a snapshot read taken outside a lock lets concurrent
 	// submissions for the same user/leaderboard/period race (e.g. two additive submissions
 	// both reading the same base and one overwrite silently dropping the other's delta).
-	return s.scoreRepo.SubmitScoreAtomic(ctx, leaderboard.ID, userID, durationIndex,
+	return s.scoreRepo.SubmitScoreAtomic(ctx, leaderboard.ID, userID, durationIndex, ttl,
 		func(current *Score) (bool, int, error) {
 			return processor.ProcessScore(ctx, current, newScore, userID)
 		})
@@ -96,8 +102,9 @@ func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, 
 	if durationIndex == -1 {
 		durationIndex = CurrentDurationIndex(leaderboard)
 	}
+	ttl := BucketCacheTTL(leaderboard.IntervalSeconds, durationIndex, time.Now())
 
-	rankingScores, err := s.scoreRepo.GetRanking(ctx, leaderboard.ID, durationIndex, page, pageSize)
+	rankingScores, err := s.scoreRepo.GetRanking(ctx, leaderboard.ID, durationIndex, ttl, page, pageSize)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -111,7 +118,7 @@ func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, 
 	for i, score := range rankingScores {
 		rank := lastRank
 		if i == 0 || score.Score != lastScore {
-			rank, err = s.scoreRepo.GetUserRank(ctx, leaderboard.ID, durationIndex, score.Score)
+			rank, err = s.scoreRepo.GetUserRank(ctx, leaderboard.ID, durationIndex, ttl, score.Score)
 			if err != nil {
 				return nil, 0, nil, err
 			}
@@ -124,7 +131,7 @@ func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, 
 		lastScore, lastRank = score.Score, rank
 	}
 
-	total, err := s.scoreRepo.CountByLeaderboard(ctx, leaderboard.ID, durationIndex)
+	total, err := s.scoreRepo.CountByLeaderboard(ctx, leaderboard.ID, durationIndex, ttl)
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -139,7 +146,7 @@ func (s *LeaderboardService) GetRankings(ctx context.Context, gameID uuid.UUID, 
 				return nil, 0, nil, err
 			}
 		} else {
-			rank, err := s.scoreRepo.GetUserRank(ctx, leaderboard.ID, durationIndex, userScore.Score)
+			rank, err := s.scoreRepo.GetUserRank(ctx, leaderboard.ID, durationIndex, ttl, userScore.Score)
 			if err != nil {
 				return nil, 0, nil, err
 			}

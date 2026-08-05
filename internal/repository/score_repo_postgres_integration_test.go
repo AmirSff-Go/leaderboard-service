@@ -28,7 +28,7 @@ func TestPostgresScoreRepo_UpsertAndGet(t *testing.T) {
 		UserID:        "user1",
 		Score:         100,
 		DurationIndex: 0,
-	}))
+	}, 0))
 
 	score, err := repo.GetByLeaderboardAndUser(ctx, lb.ID, "user1", 0)
 	require.NoError(t, err)
@@ -40,12 +40,12 @@ func TestPostgresScoreRepo_UpsertAndGet(t *testing.T) {
 		UserID:        "user1",
 		Score:         200,
 		DurationIndex: 0,
-	}))
+	}, 0))
 	score, err = repo.GetByLeaderboardAndUser(ctx, lb.ID, "user1", 0)
 	require.NoError(t, err)
 	assert.Equal(t, 200, score.Score)
 
-	count, err := repo.CountByLeaderboard(ctx, lb.ID, 0)
+	count, err := repo.CountByLeaderboard(ctx, lb.ID, 0, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 1, count, "upsert on conflict must not create a duplicate row")
 }
@@ -62,24 +62,24 @@ func TestPostgresScoreRepo_GetRankingAndListAll(t *testing.T) {
 			UserID:        user,
 			Score:         score,
 			DurationIndex: 0,
-		}))
+		}, 0))
 	}
 
-	ranking, err := repo.GetRanking(ctx, lb.ID, 0, 1, 10)
+	ranking, err := repo.GetRanking(ctx, lb.ID, 0, 0, 1, 10)
 	require.NoError(t, err)
 	require.Len(t, ranking, 3)
 	assert.Equal(t, "alice", ranking[0].UserID)
 	assert.Equal(t, "carol", ranking[1].UserID)
 	assert.Equal(t, "bob", ranking[2].UserID)
 
-	page1, err := repo.GetRanking(ctx, lb.ID, 0, 1, 2)
+	page1, err := repo.GetRanking(ctx, lb.ID, 0, 0, 1, 2)
 	require.NoError(t, err)
 	assert.Len(t, page1, 2)
-	page2, err := repo.GetRanking(ctx, lb.ID, 0, 2, 2)
+	page2, err := repo.GetRanking(ctx, lb.ID, 0, 0, 2, 2)
 	require.NoError(t, err)
 	assert.Len(t, page2, 1)
 
-	rank, err := repo.GetUserRank(ctx, lb.ID, 0, 100)
+	rank, err := repo.GetUserRank(ctx, lb.ID, 0, 0, 100)
 	require.NoError(t, err)
 	assert.Equal(t, 3, rank, "bob (100) is behind alice (300) and carol (200)")
 
@@ -105,7 +105,7 @@ func TestPostgresScoreRepo_SubmitScoreAtomic_ConcurrentAdditive(t *testing.T) {
 	for i := 0; i < submissions; i++ {
 		go func() {
 			defer wg.Done()
-			err := repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, func(current *domain.Score) (bool, int, error) {
+			err := repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, 0, func(current *domain.Score) (bool, int, error) {
 				base := 0
 				if current != nil {
 					base = current.Score
@@ -137,7 +137,7 @@ func TestPostgresScoreRepo_SubmitScoreAtomic_ConcurrentRecord(t *testing.T) {
 		newScore := i
 		go func() {
 			defer wg.Done()
-			err := repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, func(current *domain.Score) (bool, int, error) {
+			err := repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, 0, func(current *domain.Score) (bool, int, error) {
 				if current == nil || newScore > current.Score {
 					return true, newScore, nil
 				}
@@ -158,7 +158,7 @@ func TestPostgresScoreRepo_SubmitScoreAtomic_NoOpDoesNotPersist(t *testing.T) {
 	lb := seedGameAndLeaderboard(t, domain.Record, 0)
 	repo := repository.NewPostgresScoreRepo(testDB)
 
-	err := repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, func(current *domain.Score) (bool, int, error) {
+	err := repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, 0, func(current *domain.Score) (bool, int, error) {
 		return false, 0, nil
 	})
 	require.NoError(t, err)

@@ -85,3 +85,34 @@ func TestComputeDurationIndex_CrossBoundaryGetsDifferentBucket(t *testing.T) {
 	assert.NotEqual(t, before, after)
 	assert.Equal(t, before+1, after)
 }
+
+func TestBucketCacheTTL(t *testing.T) {
+	t.Run("all-time (interval <= 0) never expires", func(t *testing.T) {
+		now := time.Unix(1_000_000, 0).UTC()
+		assert.Zero(t, domain.BucketCacheTTL(0, 0, now))
+		assert.Zero(t, domain.BucketCacheTTL(-100, 0, now))
+	})
+
+	t.Run("mid-period bucket gets a TTL covering the remaining period plus grace", func(t *testing.T) {
+		interval := 3600
+		now := time.Unix(3700, 0).UTC() // 100s into bucket 1 (3600-7199)
+		ttl := domain.BucketCacheTTL(interval, 1, now)
+		// bucket ends at 7200 -> 3500s remaining, plus the grace period.
+		want := 3500*time.Second + domain.BucketCacheGracePeriod
+		assert.Equal(t, want, ttl)
+	})
+
+	t.Run("a bucket whose period already ended clamps to exactly the grace period", func(t *testing.T) {
+		interval := 3600
+		now := time.Unix(100_000, 0).UTC() // long after bucket 1 (3600-7199) ended
+		ttl := domain.BucketCacheTTL(interval, 1, now)
+		assert.Equal(t, domain.BucketCacheGracePeriod, ttl)
+	})
+
+	t.Run("right at the period boundary is treated as just ended (clamped to grace)", func(t *testing.T) {
+		interval := 3600
+		now := time.Unix(7200, 0).UTC() // exactly when bucket 1 ends / bucket 2 starts
+		ttl := domain.BucketCacheTTL(interval, 1, now)
+		assert.Equal(t, domain.BucketCacheGracePeriod, ttl)
+	})
+}

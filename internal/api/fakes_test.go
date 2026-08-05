@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
 	"github.com/AmirSff-Go/leaderboard-service/internal/repository"
@@ -102,7 +103,7 @@ func apiScoreKey(leaderboardID uuid.UUID, userID string, durationIndex int) stri
 	return fmt.Sprintf("%s:%s:%d", leaderboardID, userID, durationIndex)
 }
 
-func (r *fakeAPIScoreRepo) Upsert(ctx context.Context, score *domain.Score) error {
+func (r *fakeAPIScoreRepo) Upsert(ctx context.Context, score *domain.Score, ttl time.Duration) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.scores[apiScoreKey(score.LeaderboardID, score.UserID, score.DurationIndex)] = score
@@ -111,7 +112,7 @@ func (r *fakeAPIScoreRepo) Upsert(ctx context.Context, score *domain.Score) erro
 
 // SubmitScoreAtomic holds the lock across the whole read-decide-write sequence, mirroring the
 // transaction+advisory-lock guarantee the Postgres implementation provides.
-func (r *fakeAPIScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+func (r *fakeAPIScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int, ttl time.Duration,
 	decide func(current *domain.Score) (bool, int, error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -144,7 +145,7 @@ func (r *fakeAPIScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderbo
 	return s, nil
 }
 
-func (r *fakeAPIScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int, error) {
+func (r *fakeAPIScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -156,7 +157,7 @@ func (r *fakeAPIScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID
 	return n, nil
 }
 
-func (r *fakeAPIScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page, pageSize int) ([]*domain.Score, error) {
+func (r *fakeAPIScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration, page, pageSize int) ([]*domain.Score, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var bucket []*domain.Score
@@ -177,7 +178,7 @@ func (r *fakeAPIScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UU
 	return bucket[start:end], nil
 }
 
-func (r *fakeAPIScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error) {
+func (r *fakeAPIScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration, score int) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rank := 1
