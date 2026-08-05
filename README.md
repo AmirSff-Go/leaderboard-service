@@ -298,6 +298,16 @@ go test ./internal/domain/... -v
 
 73 unit tests covering the domain layer, all HTTP handlers, and authentication middleware. Tests use in-memory fakes — no database or Redis required.
 
+### Integration tests
+
+The repository layer also has an integration suite that runs against real Postgres and Redis via [testcontainers-go](https://golang.testcontainers.org/) — it spins up disposable containers automatically, runs the actual migration, and tears everything down after. Requires a running Docker daemon.
+
+```bash
+go test -tags=integration ./internal/repository/... -v
+```
+
+It's gated behind the `integration` build tag specifically so `go test ./...` never needs Docker — the unit suite above stays fast and dependency-free. This is also where the concurrent-submission fix (see [Architecture](#architecture)) is proven against real concurrent Postgres transactions rather than in-memory fakes: 100 concurrent submissions to the same user/leaderboard/period are asserted to produce zero lost updates.
+
 ---
 
 ## Deployment
