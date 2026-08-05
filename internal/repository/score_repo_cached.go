@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/cache"
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
@@ -23,8 +24,8 @@ func NewCachedScoreRepo(postgres *PostgresScoreRepo, redis *redis.Client) *Cache
 	}
 }
 
-func (r *CachedScoreRepo) Upsert(ctx context.Context, score *domain.Score) error {
-	err := r.postgres.Upsert(ctx, score)
+func (r *CachedScoreRepo) Upsert(ctx context.Context, score *domain.Score, ttl time.Duration) error {
+	err := r.postgres.Upsert(ctx, score, ttl)
 	if err != nil {
 		return err
 	}
@@ -46,19 +47,21 @@ func (r *CachedScoreRepo) Upsert(ctx context.Context, score *domain.Score) error
 	}).Result(); err != nil {
 		// Log the error but don't fail the request
 		slog.Error("Failed to update Redis cache", "error", err)
+		return nil
 	}
+	r.refreshTTL(ctx, score.LeaderboardID, score.DurationIndex, ttl)
 	return nil
 }
 
 // SubmitScoreAtomic delegates the atomic read-decide-write to Postgres (source of truth), then
 // syncs Redis with the confirmed outcome. Redis failure is non-fatal, matching Upsert's behavior.
-func (r *CachedScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+func (r *CachedScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int, ttl time.Duration,
 	decide func(current *domain.Score) (bool, int, error)) error {
 
 	var saved bool
 	var finalScore int
 
-	err := r.postgres.SubmitScoreAtomic(ctx, leaderboardID, userID, durationIndex, func(current *domain.Score) (bool, int, error) {
+	err := r.postgres.SubmitScoreAtomic(ctx, leaderboardID, userID, durationIndex, ttl, func(current *domain.Score) (bool, int, error) {
 		shouldSave, score, err := decide(current)
 		saved, finalScore = shouldSave, score
 		return shouldSave, score, err
@@ -83,11 +86,32 @@ func (r *CachedScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID u
 				Member: userID,
 			}).Result(); err != nil {
 				slog.Error("Failed to update Redis cache", "error", err)
+			} else {
+				r.refreshTTL(ctx, leaderboardID, durationIndex, ttl)
 			}
 		}
 	}
 
 	return nil
+}
+
+// refreshTTL sets (or, for a currently-active period, effectively re-extends) the expiry on both
+// the sorted set and its synced marker. ttl <= 0 means the bucket should never expire — an
+// all-time leaderboard's single permanent bucket — so no action is taken; existing keys are
+// created without a TTL and simply stay that way.
+func (r *CachedScoreRepo) refreshTTL(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration) {
+	if ttl <= 0 {
+		return
+	}
+	key := cache.LeaderboardKey(leaderboardID, durationIndex)
+	syncedKey := cache.LeaderboardSyncedKey(leaderboardID, durationIndex)
+	if _, err := r.redis.Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.Expire(ctx, key, ttl)
+		pipe.Expire(ctx, syncedKey, ttl)
+		return nil
+	}); err != nil {
+		slog.Error("Failed to refresh Redis cache TTL", "error", err)
+	}
 }
 
 // isWarm reports whether the Redis sorted set for (leaderboardID, durationIndex) is a complete
@@ -104,8 +128,10 @@ func (r *CachedScoreRepo) isWarm(ctx context.Context, leaderboardID uuid.UUID, d
 
 // warmCache fully hydrates the sorted set for (leaderboardID, durationIndex) from Postgres and
 // marks it synced. It replaces whatever the key currently holds, so a previously-poisoned partial
-// set is corrected rather than merged with.
-func (r *CachedScoreRepo) warmCache(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) ([]*domain.Score, error) {
+// set is corrected rather than merged with. ttl <= 0 leaves both keys without an expiry (the
+// all-time case); otherwise both are created with that TTL directly, rather than a separate
+// refreshTTL call, so the hydration and its expiry land in the same indivisible transaction.
+func (r *CachedScoreRepo) warmCache(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration) ([]*domain.Score, error) {
 	all, err := r.postgres.ListAllByLeaderboard(ctx, leaderboardID, durationIndex)
 	if err != nil {
 		return nil, err
@@ -125,6 +151,10 @@ func (r *CachedScoreRepo) warmCache(ctx context.Context, leaderboardID uuid.UUID
 			pipe.ZAdd(ctx, key, redis.Z{Score: float64(s.Score), Member: s.UserID})
 		}
 		pipe.Set(ctx, syncedKey, "1", 0)
+		if ttl > 0 {
+			pipe.Expire(ctx, key, ttl)
+			pipe.Expire(ctx, syncedKey, ttl)
+		}
 		return nil
 	})
 	if err != nil {
@@ -155,40 +185,40 @@ func (r *CachedScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderboa
 	return score, nil
 }
 
-func (r *CachedScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error) {
+func (r *CachedScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration, score int) (int, error) {
 	warm, err := r.isWarm(ctx, leaderboardID, durationIndex)
 	if err != nil {
 		slog.Error("Failed to check Redis cache warm state", "error", err)
-		return r.postgres.GetUserRank(ctx, leaderboardID, durationIndex, score)
+		return r.postgres.GetUserRank(ctx, leaderboardID, durationIndex, ttl, score)
 	}
 	if !warm {
 		// Rank must reflect the whole leaderboard; a cold cache can't answer this correctly, and
 		// GetRanking (called first in the GetRankings flow) will normally have already warmed it.
-		return r.postgres.GetUserRank(ctx, leaderboardID, durationIndex, score)
+		return r.postgres.GetUserRank(ctx, leaderboardID, durationIndex, ttl, score)
 	}
 
 	key := cache.LeaderboardKey(leaderboardID, durationIndex)
 	count, err := r.redis.ZCount(ctx, key, fmt.Sprintf("(%d", score), "+inf").Result()
 	if err != nil {
 		slog.Error("Failed to get rank from Redis cache", "error", err)
-		return r.postgres.GetUserRank(ctx, leaderboardID, durationIndex, score)
+		return r.postgres.GetUserRank(ctx, leaderboardID, durationIndex, ttl, score)
 	}
 	return int(count) + 1, nil
 }
 
-func (r *CachedScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page,
+func (r *CachedScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration, page,
 	pageSize int) ([]*domain.Score, error) {
 	warm, err := r.isWarm(ctx, leaderboardID, durationIndex)
 	if err != nil {
 		slog.Error("Failed to check Redis cache warm state", "error", err)
-		return r.postgres.GetRanking(ctx, leaderboardID, durationIndex, page, pageSize)
+		return r.postgres.GetRanking(ctx, leaderboardID, durationIndex, ttl, page, pageSize)
 	}
 
 	if !warm {
-		all, err := r.warmCache(ctx, leaderboardID, durationIndex)
+		all, err := r.warmCache(ctx, leaderboardID, durationIndex, ttl)
 		if err != nil {
 			slog.Error("Failed to warm Redis cache, falling back to Postgres", "error", err)
-			return r.postgres.GetRanking(ctx, leaderboardID, durationIndex, page, pageSize)
+			return r.postgres.GetRanking(ctx, leaderboardID, durationIndex, ttl, page, pageSize)
 		}
 		return paginateScores(all, page, pageSize), nil
 	}
@@ -199,7 +229,7 @@ func (r *CachedScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUI
 	results, err := r.redis.ZRevRangeWithScores(ctx, key, start, stop).Result()
 	if err != nil {
 		slog.Error("Failed to get ranking from Redis cache", "error", err)
-		return r.postgres.GetRanking(ctx, leaderboardID, durationIndex, page, pageSize)
+		return r.postgres.GetRanking(ctx, leaderboardID, durationIndex, ttl, page, pageSize)
 	}
 
 	scores := make([]*domain.Score, 0, len(results))
@@ -212,18 +242,18 @@ func (r *CachedScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUI
 	return scores, nil
 }
 
-func (r *CachedScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int, error) {
+func (r *CachedScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration) (int, error) {
 	warm, err := r.isWarm(ctx, leaderboardID, durationIndex)
 	if err != nil {
 		slog.Error("Failed to check Redis cache warm state", "error", err)
-		return r.postgres.CountByLeaderboard(ctx, leaderboardID, durationIndex)
+		return r.postgres.CountByLeaderboard(ctx, leaderboardID, durationIndex, ttl)
 	}
 
 	if !warm {
-		all, err := r.warmCache(ctx, leaderboardID, durationIndex)
+		all, err := r.warmCache(ctx, leaderboardID, durationIndex, ttl)
 		if err != nil {
 			slog.Error("Failed to warm Redis cache, falling back to Postgres", "error", err)
-			return r.postgres.CountByLeaderboard(ctx, leaderboardID, durationIndex)
+			return r.postgres.CountByLeaderboard(ctx, leaderboardID, durationIndex, ttl)
 		}
 		return len(all), nil
 	}
@@ -232,7 +262,7 @@ func (r *CachedScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID 
 	count, err := r.redis.ZCard(ctx, key).Result()
 	if err != nil {
 		slog.Error("Failed to get count from Redis cache", "error", err)
-		return r.postgres.CountByLeaderboard(ctx, leaderboardID, durationIndex)
+		return r.postgres.CountByLeaderboard(ctx, leaderboardID, durationIndex, ttl)
 	}
 	return int(count), nil
 }

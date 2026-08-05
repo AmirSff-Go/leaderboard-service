@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
 	"github.com/google/uuid"
@@ -46,9 +47,10 @@ func (r *fakeLeaderboardRepo) GetByGameAndName(ctx context.Context, gameID uuid.
 
 // fakeScoreRepo is an in-memory domain.ScoreRepository for unit tests.
 type fakeScoreRepo struct {
-	mu            sync.Mutex
-	scores        map[string]*domain.Score
+	mu               sync.Mutex
+	scores           map[string]*domain.Score
 	getUserRankCalls int
+	lastTTL          time.Duration // ttl last seen by SubmitScoreAtomic or GetRanking
 }
 
 func newFakeScoreRepo() *fakeScoreRepo {
@@ -59,7 +61,7 @@ func domainScoreKey(leaderboardID uuid.UUID, userID string, durationIndex int) s
 	return fmt.Sprintf("%s:%s:%d", leaderboardID, userID, durationIndex)
 }
 
-func (r *fakeScoreRepo) Upsert(ctx context.Context, score *domain.Score) error {
+func (r *fakeScoreRepo) Upsert(ctx context.Context, score *domain.Score, ttl time.Duration) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.scores[domainScoreKey(score.LeaderboardID, score.UserID, score.DurationIndex)] = score
@@ -68,10 +70,11 @@ func (r *fakeScoreRepo) Upsert(ctx context.Context, score *domain.Score) error {
 
 // SubmitScoreAtomic holds the lock across the whole read-decide-write sequence, mirroring the
 // transaction+advisory-lock guarantee the Postgres implementation provides.
-func (r *fakeScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+func (r *fakeScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int, ttl time.Duration,
 	decide func(current *domain.Score) (bool, int, error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.lastTTL = ttl
 
 	key := domainScoreKey(leaderboardID, userID, durationIndex)
 	shouldSave, finalScore, err := decide(r.scores[key])
@@ -101,7 +104,7 @@ func (r *fakeScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderboard
 	return s, nil
 }
 
-func (r *fakeScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int, error) {
+func (r *fakeScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
@@ -113,9 +116,10 @@ func (r *fakeScoreRepo) CountByLeaderboard(ctx context.Context, leaderboardID uu
 	return n, nil
 }
 
-func (r *fakeScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page, pageSize int) ([]*domain.Score, error) {
+func (r *fakeScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration, page, pageSize int) ([]*domain.Score, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.lastTTL = ttl
 	var bucket []*domain.Score
 	for _, s := range r.scores {
 		if s.LeaderboardID == leaderboardID && s.DurationIndex == durationIndex {
@@ -141,7 +145,7 @@ func (r *fakeScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID,
 	return bucket[start:end], nil
 }
 
-func (r *fakeScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error) {
+func (r *fakeScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, ttl time.Duration, score int) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.getUserRankCalls++

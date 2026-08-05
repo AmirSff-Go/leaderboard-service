@@ -5,6 +5,7 @@ package repository_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
@@ -34,7 +35,7 @@ func TestCachedScoreRepo_ColdWriteDoesNotPoisonCache(t *testing.T) {
 
 	for i := 1; i <= 20; i++ {
 		user := "user" + string(rune('a'+i-1))
-		err := repo.SubmitScoreAtomic(ctx, lb.ID, user, 0, func(current *domain.Score) (bool, int, error) {
+		err := repo.SubmitScoreAtomic(ctx, lb.ID, user, 0, 0, func(current *domain.Score) (bool, int, error) {
 			return true, i * 10, nil
 		})
 		require.NoError(t, err)
@@ -60,13 +61,13 @@ func TestCachedScoreRepo_FirstReadFullyWarmsCache(t *testing.T) {
 
 	for i := 1; i <= 20; i++ {
 		user := "user" + string(rune('a'+i-1))
-		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, user, 0, func(current *domain.Score) (bool, int, error) {
+		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, user, 0, 0, func(current *domain.Score) (bool, int, error) {
 			return true, i * 10, nil
 		}))
 	}
 
 	// Ask for a small page — a page-scoped warm-up (the old bug) would only cache this slice.
-	ranking, err := repo.GetRanking(ctx, lb.ID, 0, 1, 5)
+	ranking, err := repo.GetRanking(ctx, lb.ID, 0, 0, 1, 5)
 	require.NoError(t, err)
 	require.Len(t, ranking, 5)
 	assert.Equal(t, 200, ranking[0].Score)
@@ -76,7 +77,7 @@ func TestCachedScoreRepo_FirstReadFullyWarmsCache(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 20, card, "the full leaderboard must be hydrated, not just the requested page")
 
-	total, err := repo.CountByLeaderboard(ctx, lb.ID, 0)
+	total, err := repo.CountByLeaderboard(ctx, lb.ID, 0, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 20, total)
 }
@@ -88,13 +89,13 @@ func TestCachedScoreRepo_IncrementalWriteAfterWarm(t *testing.T) {
 	lb := seedGameAndLeaderboard(t, domain.Record, 0)
 	repo := newCachedRepo(t)
 
-	require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, func(current *domain.Score) (bool, int, error) {
+	require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, 0, func(current *domain.Score) (bool, int, error) {
 		return true, 100, nil
 	}))
-	_, err := repo.GetRanking(ctx, lb.ID, 0, 1, 10) // warms the cache
+	_, err := repo.GetRanking(ctx, lb.ID, 0, 0, 1, 10) // warms the cache
 	require.NoError(t, err)
 
-	require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "user2", 0, func(current *domain.Score) (bool, int, error) {
+	require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "user2", 0, 0, func(current *domain.Score) (bool, int, error) {
 		return true, 250, nil
 	}))
 
@@ -103,11 +104,11 @@ func TestCachedScoreRepo_IncrementalWriteAfterWarm(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, card)
 
-	total, err := repo.CountByLeaderboard(ctx, lb.ID, 0)
+	total, err := repo.CountByLeaderboard(ctx, lb.ID, 0, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 2, total)
 
-	rank, err := repo.GetUserRank(ctx, lb.ID, 0, 250)
+	rank, err := repo.GetUserRank(ctx, lb.ID, 0, 0, 250)
 	require.NoError(t, err)
 	assert.Equal(t, 1, rank)
 }
@@ -122,7 +123,7 @@ func TestCachedScoreRepo_SelfHealsPoisonedCache(t *testing.T) {
 
 	for i := 1; i <= 10; i++ {
 		user := "user" + string(rune('a'+i-1))
-		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, user, 0, func(current *domain.Score) (bool, int, error) {
+		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, user, 0, 0, func(current *domain.Score) (bool, int, error) {
 			return true, i * 5, nil
 		}))
 	}
@@ -135,7 +136,7 @@ func TestCachedScoreRepo_SelfHealsPoisonedCache(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, syncedExists, "precondition: poisoned state must not be marked synced")
 
-	ranking, err := repo.GetRanking(ctx, lb.ID, 0, 1, 20)
+	ranking, err := repo.GetRanking(ctx, lb.ID, 0, 0, 1, 20)
 	require.NoError(t, err)
 	require.Len(t, ranking, 10, "poisoned entry must be discarded, real 10 entries restored")
 	for _, s := range ranking {
@@ -146,7 +147,74 @@ func TestCachedScoreRepo_SelfHealsPoisonedCache(t *testing.T) {
 	assert.ErrorIs(t, err, redis.Nil, "ghost-user must be gone after self-heal")
 	assert.Zero(t, score)
 
-	total, err := repo.CountByLeaderboard(ctx, lb.ID, 0)
+	total, err := repo.CountByLeaderboard(ctx, lb.ID, 0, 0)
 	require.NoError(t, err)
 	assert.Equal(t, 10, total)
+}
+
+// TestCachedScoreRepo_TTL verifies a real Redis EXPIRE is actually set on both the sorted set and
+// its synced marker — the unit tests against fakes can only prove BucketCacheTTL computes the
+// right duration and that the service passes it through; only a real Redis can prove the repo
+// layer turns that duration into an actual key expiry.
+func TestCachedScoreRepo_TTL(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ttl > 0 sets an expiry on warm (cold read) and on a write to an already-warm bucket", func(t *testing.T) {
+		lb := seedGameAndLeaderboard(t, domain.Record, 0)
+		repo := newCachedRepo(t)
+		ttl := time.Hour
+
+		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, ttl, func(current *domain.Score) (bool, int, error) {
+			return true, 100, nil
+		}))
+		// First read is a cold warm — exercises warmCache's TTL branch.
+		_, err := repo.GetRanking(ctx, lb.ID, 0, ttl, 1, 10)
+		require.NoError(t, err)
+
+		key := cache.LeaderboardKey(lb.ID, 0)
+		syncedKey := cache.LeaderboardSyncedKey(lb.ID, 0)
+		assertTTLRoughly(t, key, ttl)
+		assertTTLRoughly(t, syncedKey, ttl)
+
+		// A write against the now-warm cache goes through refreshTTL instead of warmCache — must
+		// also set the expiry, not just leave whatever warmCache set.
+		require.NoError(t, testRedisClient.Persist(ctx, key).Err())
+		require.NoError(t, testRedisClient.Persist(ctx, syncedKey).Err())
+		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "user2", 0, ttl, func(current *domain.Score) (bool, int, error) {
+			return true, 200, nil
+		}))
+		assertTTLRoughly(t, key, ttl)
+		assertTTLRoughly(t, syncedKey, ttl)
+	})
+
+	t.Run("ttl <= 0 (all-time) leaves keys without an expiry", func(t *testing.T) {
+		lb := seedGameAndLeaderboard(t, domain.Record, 0) // IntervalSeconds: 0 -> BucketCacheTTL is 0
+		repo := newCachedRepo(t)
+
+		require.NoError(t, repo.SubmitScoreAtomic(ctx, lb.ID, "user1", 0, 0, func(current *domain.Score) (bool, int, error) {
+			return true, 100, nil
+		}))
+		_, err := repo.GetRanking(ctx, lb.ID, 0, 0, 1, 10)
+		require.NoError(t, err)
+
+		key := cache.LeaderboardKey(lb.ID, 0)
+		syncedKey := cache.LeaderboardSyncedKey(lb.ID, 0)
+		assertNoTTL(t, key)
+		assertNoTTL(t, syncedKey)
+	})
+}
+
+func assertTTLRoughly(t *testing.T, key string, want time.Duration) {
+	t.Helper()
+	ttl, err := testRedisClient.TTL(context.Background(), key).Result()
+	require.NoError(t, err)
+	require.Greater(t, ttl, time.Duration(0), "key %q must have an expiry set", key)
+	assert.InDelta(t, want.Seconds(), ttl.Seconds(), 10, "key %q TTL should be close to the requested duration", key)
+}
+
+func assertNoTTL(t *testing.T, key string) {
+	t.Helper()
+	ttl, err := testRedisClient.TTL(context.Background(), key).Result()
+	require.NoError(t, err)
+	assert.Equal(t, time.Duration(-1), ttl, "key %q must not have an expiry", key)
 }

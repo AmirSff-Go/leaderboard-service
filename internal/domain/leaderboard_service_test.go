@@ -180,6 +180,42 @@ func TestLeaderboardService_SubmitScore(t *testing.T) {
 	})
 }
 
+// --- Cache TTL wiring ---
+// SubmitScore and GetRankings must pass BucketCacheTTL's result through to the repository, not a
+// hardcoded 0 — otherwise the cache TTL fix is dead code no matter how correct BucketCacheTTL
+// itself is. fakeScoreRepo.lastTTL records whatever ttl the service actually passed in.
+
+func TestLeaderboardService_PassesBucketCacheTTLToRepository(t *testing.T) {
+	ctx := context.Background()
+	gameID := uuid.New()
+
+	t.Run("all-time leaderboard passes ttl=0 (never expire)", func(t *testing.T) {
+		svc, lbRepo, scoreRepo := newTestService()
+		seedLeaderboard(ctx, lbRepo, gameID, "all-time", domain.Record) // IntervalSeconds: 0
+
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "all-time", "user1", 100))
+		assert.Zero(t, scoreRepo.lastTTL)
+
+		_, _, _, err := svc.GetRankings(ctx, gameID, "all-time", 1, 20, "", 0)
+		require.NoError(t, err)
+		assert.Zero(t, scoreRepo.lastTTL)
+	})
+
+	t.Run("periodic leaderboard passes a positive ttl", func(t *testing.T) {
+		svc, lbRepo, scoreRepo := newTestService()
+		lb := &domain.Leaderboard{GameID: gameID, UniqueName: "daily", Type: domain.Record, IntervalSeconds: 86400}
+		require.NoError(t, lbRepo.Create(ctx, lb))
+
+		require.NoError(t, svc.SubmitScore(ctx, gameID, "daily", "user1", 100))
+		assert.Positive(t, scoreRepo.lastTTL)
+		assert.GreaterOrEqual(t, scoreRepo.lastTTL, domain.BucketCacheGracePeriod)
+
+		_, _, _, err := svc.GetRankings(ctx, gameID, "daily", 1, 20, "", 0)
+		require.NoError(t, err)
+		assert.Positive(t, scoreRepo.lastTTL)
+	})
+}
+
 // --- GetRankings ---
 
 func TestLeaderboardService_GetRankings(t *testing.T) {
