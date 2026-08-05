@@ -93,11 +93,15 @@ func TestLeaderboardHandler_CreateLeaderboard(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rec.Code)
 	})
 
-	t.Run("zero interval_seconds returns 400", func(t *testing.T) {
+	t.Run("zero interval_seconds is valid (all-time leaderboard)", func(t *testing.T) {
 		e, _, _, _ := newLeaderboardTestEnv()
-		body := `{"unique_name":"weekly","type":"record","interval_seconds":0}`
+		body := `{"unique_name":"all-time","type":"record","interval_seconds":0}`
 		rec := doRequest(e, http.MethodPost, "/leaderboards", body)
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
+		require.Equal(t, http.StatusCreated, rec.Code)
+
+		var lb domain.Leaderboard
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &lb))
+		assert.Equal(t, 0, lb.IntervalSeconds)
 	})
 
 	t.Run("negative interval_seconds returns 400", func(t *testing.T) {

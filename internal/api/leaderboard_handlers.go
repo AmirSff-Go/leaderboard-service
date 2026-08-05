@@ -50,8 +50,8 @@ func (h *LeaderboardHandler) CreateLeaderboard(c echo.Context) error {
 		return respondError(c, http.StatusBadRequest, "unique_name is required")
 	} else if req.Type == "" {
 		return respondError(c, http.StatusBadRequest, "type is required")
-	} else if req.IntervalSeconds <= 0 {
-		return respondError(c, http.StatusBadRequest, "interval_seconds must be greater than 0")
+	} else if req.IntervalSeconds < 0 {
+		return respondError(c, http.StatusBadRequest, "interval_seconds must be zero or greater")
 	} else if !domain.IsValidLeaderboardType(req.Type) {
 		return respondError(c, http.StatusBadRequest, "invalid type")
 	}
