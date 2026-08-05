@@ -296,7 +296,7 @@ go test ./... -race
 go test ./internal/domain/... -v
 ```
 
-73 unit tests covering the domain layer, all HTTP handlers, and authentication middleware. Tests use in-memory fakes — no database or Redis required.
+112 unit tests covering the domain layer, all HTTP handlers, authentication middleware, and the Redis client pool configuration. Tests use in-memory fakes — no database or Redis required.
 
 ### Integration tests
 

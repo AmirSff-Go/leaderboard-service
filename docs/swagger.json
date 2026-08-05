@@ -63,7 +63,7 @@
         },
         "/admin/games/{id}": {
             "patch": {
-                "description": "Updates name and/or description for a game. game_name is optional; omit to keep the current value.",
+                "description": "Updates name and/or description for a game. game_name and game_desc are each optional; omit either to keep its current value.",
                 "consumes": [
                     "application/json"
                 ],
@@ -325,13 +325,13 @@
                     },
                     {
                         "type": "integer",
-                        "description": "Page number (default: 1)",
+                        "description": "Page number, 1-based (default: 1)",
                         "name": "page",
                         "in": "query"
                     },
                     {
                         "type": "integer",
-                        "description": "Results per page (default: 20)",
+                        "description": "Results per page, must be 1 or greater (default: 20)",
                         "name": "page_size",
                         "in": "query"
                     },
@@ -353,6 +353,12 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/api.GetRankingsResponseBody"
+                        }
+                    },
+                    "400": {
+                        "description": "page or page_size less than 1",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
                         }
                     },
                     "401": {
