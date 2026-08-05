@@ -152,11 +152,16 @@ func (r *PostgresScoreRepo) GetUserRank(ctx context.Context, leaderboardID uuid.
 func (r *PostgresScoreRepo) GetRanking(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, page,
 	pageSize int) ([]*domain.Score, error) {
 	offset := (page - 1) * pageSize
+	// ORDER BY score DESC alone has no defined order among ties, so two separate paginated
+	// queries (i.e. two page fetches) aren't guaranteed to agree on where a tied group splits —
+	// a row could be duplicated across pages or skipped entirely. user_id ASC as a tiebreaker
+	// makes ordering deterministic across queries, and matches Redis's ZREVRANGE, which breaks
+	// ties on member (user_id) lexicographically.
 	query := `
                 SELECT id, leaderboard_id, user_id, score, duration_index, created_at, updated_at
                 FROM scores
                 WHERE leaderboard_id = $1 AND duration_index = $2
-                ORDER BY score DESC
+                ORDER BY score DESC, user_id ASC
                 LIMIT $3 OFFSET $4
         `
 	rows, err := r.db.QueryContext(ctx, query, leaderboardID, durationIndex, pageSize, offset)
