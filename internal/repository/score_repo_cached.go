@@ -41,6 +41,37 @@ func (r *CachedScoreRepo) Upsert(ctx context.Context, score *domain.Score) error
 	return nil
 }
 
+// SubmitScoreAtomic delegates the atomic read-decide-write to Postgres (source of truth), then
+// syncs Redis with the confirmed outcome. Redis failure is non-fatal, matching Upsert's behavior.
+func (r *CachedScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+	decide func(current *domain.Score) (bool, int, error)) error {
+
+	var saved bool
+	var finalScore int
+
+	err := r.postgres.SubmitScoreAtomic(ctx, leaderboardID, userID, durationIndex, func(current *domain.Score) (bool, int, error) {
+		shouldSave, score, err := decide(current)
+		saved, finalScore = shouldSave, score
+		return shouldSave, score, err
+	})
+	if err != nil {
+		return err
+	}
+
+	if saved {
+		key := cache.LeaderboardKey(leaderboardID, durationIndex)
+		if _, err := r.redis.ZAdd(ctx, key, redis.Z{
+			Score:  float64(finalScore),
+			Member: userID,
+		}).Result(); err != nil {
+			// Log the error but don't fail the request
+			slog.Error("Failed to update Redis cache", "error", err)
+		}
+	}
+
+	return nil
+}
+
 func (r *CachedScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string,
 	durationIndex int) (*domain.Score, error) {
 	score, err := r.postgres.GetByLeaderboardAndUser(ctx, leaderboardID, userID, durationIndex)

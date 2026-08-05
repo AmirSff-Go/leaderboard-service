@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/domain"
 	"github.com/google/uuid"
@@ -35,6 +36,75 @@ func (r *PostgresScoreRepo) Upsert(ctx context.Context, score *domain.Score) err
 		score.DurationIndex,
 	)
 	return err
+}
+
+// SubmitScoreAtomic serializes read-decide-write for one (leaderboardID, userID, durationIndex)
+// tuple using a transaction-scoped Postgres advisory lock. Concurrent submissions for the same
+// tuple block on the lock instead of racing on a stale read; submissions for different tuples
+// (different users, leaderboards, or periods) are unaffected and proceed in parallel.
+func (r *PostgresScoreRepo) SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+	decide func(current *domain.Score) (bool, int, error)) error {
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	lockKey := fmt.Sprintf("%s:%s:%d", leaderboardID, userID, durationIndex)
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, lockKey); err != nil {
+		return err
+	}
+
+	current, err := getScoreForUpdate(ctx, tx, leaderboardID, userID, durationIndex)
+	if err != nil {
+		return err
+	}
+
+	shouldSave, finalScore, err := decide(current)
+	if err != nil {
+		return err
+	}
+	if !shouldSave {
+		return tx.Commit()
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO scores (id, leaderboard_id, user_id, score, duration_index, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+		ON CONFLICT (leaderboard_id, user_id, duration_index) DO UPDATE
+		SET score = EXCLUDED.score, updated_at = NOW()
+	`, uuid.New(), leaderboardID, userID, finalScore, durationIndex)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func getScoreForUpdate(ctx context.Context, tx *sql.Tx, leaderboardID uuid.UUID, userID string, durationIndex int) (*domain.Score, error) {
+	query := `
+		SELECT id, leaderboard_id, user_id, score, duration_index, created_at, updated_at
+		FROM scores
+		WHERE leaderboard_id = $1 AND user_id = $2 AND duration_index = $3
+	`
+	var score domain.Score
+	err := tx.QueryRowContext(ctx, query, leaderboardID, userID, durationIndex).Scan(
+		&score.ID,
+		&score.LeaderboardID,
+		&score.UserID,
+		&score.Score,
+		&score.DurationIndex,
+		&score.CreatedAt,
+		&score.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &score, nil
 }
 
 func (r *PostgresScoreRepo) GetByLeaderboardAndUser(ctx context.Context, leaderboardID uuid.UUID, userID string,

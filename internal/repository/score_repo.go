@@ -17,4 +17,10 @@ type ScoreRepo interface {
 	CountByLeaderboard(ctx context.Context, leaderboardID uuid.UUID, durationIndex int) (int, error)
 
 	GetUserRank(ctx context.Context, leaderboardID uuid.UUID, durationIndex int, score int) (int, error)
+
+	// SubmitScoreAtomic runs decide with the current score for (leaderboardID, userID, durationIndex)
+	// and, if it reports shouldSave, persists finalScore — all serialized against concurrent callers
+	// for that same tuple. current is nil when no score exists yet.
+	SubmitScoreAtomic(ctx context.Context, leaderboardID uuid.UUID, userID string, durationIndex int,
+		decide func(current *domain.Score) (shouldSave bool, finalScore int, err error)) error
 }
