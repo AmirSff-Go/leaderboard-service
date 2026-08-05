@@ -183,4 +183,29 @@ func TestAdminHandler_EditGame(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "updated-name", updated.Name)
 	})
+
+	t.Run("description is preserved when game_desc is omitted", func(t *testing.T) {
+		e, gameRepo, game := setup(t)
+		game.Description = "original description"
+		require.NoError(t, gameRepo.Update(context.Background(), game))
+
+		body := `{"admin_password":"admin123","game_name":"updated-name"}`
+		rec := doRequest(e, http.MethodPatch, "/admin/games/"+game.ID.String(), body)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		updated, err := gameRepo.GetByID(context.Background(), game.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "original description", updated.Description)
+	})
+
+	t.Run("description is updated when game_desc is provided", func(t *testing.T) {
+		e, gameRepo, game := setup(t)
+		body := `{"admin_password":"admin123","game_desc":"new description"}`
+		rec := doRequest(e, http.MethodPatch, "/admin/games/"+game.ID.String(), body)
+		require.Equal(t, http.StatusOK, rec.Code)
+
+		updated, err := gameRepo.GetByID(context.Background(), game.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "new description", updated.Description)
+	})
 }
