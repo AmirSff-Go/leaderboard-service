@@ -125,11 +125,12 @@ type GetRankingsResponseBody struct {
 // @Produce     json
 // @Security    BearerAuth
 // @Param       name           path  string true  "Leaderboard unique name"
-// @Param       page           query int    false "Page number (default: 1)"
-// @Param       page_size      query int    false "Results per page (default: 20)"
+// @Param       page           query int    false "Page number, 1-based (default: 1)"
+// @Param       page_size      query int    false "Results per page, must be 1 or greater (default: 20)"
 // @Param       user_id        query string false "Include this user's rank and score in user_entry"
 // @Param       duration_index query int    false "Time bucket (-1 = current period, 0+ = historical)"
 // @Success     200 {object} GetRankingsResponseBody
+// @Failure     400 {object} ErrorResponse "page or page_size less than 1"
 // @Failure     401 {object} ErrorResponse "invalid or missing token"
 // @Failure     404 {object} ErrorResponse "leaderboard not found"
 // @Failure     500 {object} ErrorResponse
@@ -140,6 +141,13 @@ func (h *LeaderboardHandler) GetRankings(c echo.Context) error {
 	pageSize, _ := GetIntQueryParam(c, "page_size", 20)
 	userId := c.QueryParam("user_id")
 	durationIndex, _ := GetIntQueryParam(c, "duration_index", -1)
+
+	if page < 1 {
+		return respondError(c, http.StatusBadRequest, "page must be 1 or greater")
+	}
+	if pageSize < 1 {
+		return respondError(c, http.StatusBadRequest, "page_size must be 1 or greater")
+	}
 
 	game := GetGameFromContext(c)
 
