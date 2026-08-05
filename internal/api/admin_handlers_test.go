@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/api"
 	"github.com/AmirSff-Go/leaderboard-service/internal/auth"
@@ -48,6 +49,20 @@ func TestAdminHandler_RegisterGame(t *testing.T) {
 		assert.NotEmpty(t, resp["token"])
 		assert.Equal(t, "My Game", resp["name"])
 		assert.NotEmpty(t, resp["id"])
+	})
+
+	t.Run("created_at is RFC3339, not Go's default time format", func(t *testing.T) {
+		e, _ := newAdminTestEnv()
+		body := `{"admin_password":"admin123","game_name":"My Game"}`
+		rec := doRequest(e, http.MethodPost, "/admin/games", body)
+		require.Equal(t, http.StatusCreated, rec.Code)
+
+		var resp map[string]interface{}
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		createdAt, ok := resp["created_at"].(string)
+		require.True(t, ok, "created_at should be a JSON string")
+		_, err := time.Parse(time.RFC3339, createdAt)
+		assert.NoError(t, err, "created_at must be RFC3339, got %q", createdAt)
 	})
 
 	t.Run("wrong admin password returns 401", func(t *testing.T) {
