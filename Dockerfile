@@ -2,6 +2,11 @@ FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 
+# proxy.golang.org 403s some module paths from this host's network; goproxy.cn is a full mirror
+# that works here. Overridable via --build-arg GOPROXY=... on a network where the default works.
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
+
 COPY go.mod go.sum ./
 RUN go mod download
 
