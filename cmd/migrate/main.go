@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/AmirSff-Go/leaderboard-service/internal/config"
+	"github.com/AmirSff-Go/leaderboard-service/internal/repository"
 	_ "github.com/lib/pq"
 )
 
@@ -22,9 +23,10 @@ func main() {
 	}
 	defer db.Close()
 
-	// Step 2: Read migration file/
-	// Read the file internal/repository/migrations/001_init_schema.sql
-	migration, err := os.ReadFile("internal/repository/migrations/001_init_schema.sql")
+	// Read from repository.MigrationsFS (embedded at compile time), not the filesystem
+	// directly — this binary needs to run correctly with no source tree present, e.g. the
+	// distroless production image the Dockerfile builds.
+	migration, err := repository.MigrationsFS.ReadFile("migrations/001_init_schema.sql")
 	if err != nil {
 		panic(err)
 	}
@@ -47,4 +49,5 @@ func main() {
 
 	// Step 5: Report success
 	println("✅ Migration successful")
+	os.Exit(0)
 }

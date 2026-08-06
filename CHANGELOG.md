@@ -28,3 +28,8 @@ Baseline. Everything merged before this changelog existed: multiple leaderboard 
 - `DELETE /leaderboards/{name}/scores/{user_id}` — removes a user's score for one period (default: current). Returns `404` if no score exists there. Use to correct accidental submissions or remove a participant.
 
 These close the gap called out in the design review: organizers could create leaderboards and submit scores, but had no way to fix a typo, rename a board, remove a participant, or delete a leaderboard entirely without an endpoint. All four are B2C-blocking without this.
+
+## [1.1.1] - 2026-08-07
+
+### Fixed
+- `cmd/migrate` read its migration file from a relative filesystem path (`internal/repository/migrations/001_init_schema.sql`), which only resolved when the source tree was present on disk — true under `go run` in a dev checkout, false in the distroless production image, which ships no source tree at all. Migrations are now compiled into the binary via `//go:embed` (`internal/repository/migrations.go`) and `cmd/migrate` reads from that embedded filesystem instead. The Dockerfile now also builds `/migrate` alongside `/server`, so a deployed image can actually run its own migrations (`docker run --rm <image> /migrate`) with no source checkout required. No API surface change.
