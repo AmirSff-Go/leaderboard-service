@@ -320,6 +320,18 @@ docker run -p 8080:8080 --env-file .env leaderboard-service
 ```
 
 The image is built on `gcr.io/distroless/static` — no shell, non-root user, minimal attack surface.
+It contains **two** binaries: `/server` (the default `CMD`) and `/migrate`. `/migrate` is
+self-contained — its SQL file is compiled in via `internal/repository`'s `go:embed`, not read from
+disk at runtime — so it works from this same distroless image with no source checkout:
+
+```bash
+docker run --rm -e ADMIN_PASSWORD=x -e DATABASE_URL="<production DATABASE_URL>" -e REDIS_URL=x -e JWT_SECRET=x leaderboard-service /migrate
+```
+
+Run this — or the equivalent one-off Job in your orchestrator — before rolling out a `/server`
+image that expects the new schema. `config.Load()` requires all four variables even though
+migration itself only touches Postgres; any placeholder value works for the other three. The
+migration is written to be safely re-runnable, so running it again is harmless.
 
 ### Kubernetes
 
@@ -342,6 +354,17 @@ readinessProbe:
 ```
 
 The server handles `SIGTERM` with a 25-second graceful shutdown window — set `terminationGracePeriodSeconds: 30` in your Pod spec.
+
+This service is internal-only by design — it's a backend for `boardinio-backend` (a separate
+repository), never called directly by an end client. Don't give it a public Ingress/DNS record;
+only `boardinio-backend`'s own network should be able to reach it.
+
+### Current production deployment
+
+Running in the `boardinio` Kubernetes namespace alongside `boardinio-backend`, its own dedicated
+Postgres, and a Redis cache — manifests live at `/root/deployments/boardinio/leaderboard-service`
+on the cluster's host. No public endpoint, per the internal-only note above; `boardinio-backend`
+reaches it at `http://leaderboard-service:8080` over the cluster network.
 
 ---
 
